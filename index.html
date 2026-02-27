@@ -1137,27 +1137,18 @@ body.modal-open {
             {{ isAdmin ? 'АДМИНИСТРАТОР' : (user.first_name || 'Клиент') }}
         </div>
 
-        <!-- ВИДЖЕТ ВХОДА - теперь с правильным отображением -->
-        <div v-if="user.is_guest" style="margin: 15px 0;">
-    <div id="telegram-login-container" style="
-        display: flex;
-        justify-content: center;
-        min-height: 60px;
-    "></div>
-    
-    <!-- ВРЕМЕННАЯ КНОПКА ДЛЯ ТЕСТА -->
-    <button @click="loadTelegramWidget" 
-            style="background: #000; color: #fff; border: none; padding: 10px; margin-top: 10px; width: 100%;">
-        🔄 ЗАГРУЗИТЬ ВИДЖЕТ ВРУЧНУЮ
-    </button>
-    
-    <div style="font-size: 12px; color: #666; margin-top: 10px;">
-        Нажмите кнопку "Login with Telegram" для входа
-    </div>
-</div>
+        <!-- ВИДЖЕТ ВХОДА - ТОЛЬКО ДЛЯ ГОСТЕЙ -->
+        <div v-if="user.is_guest" id="telegram-login-container" style="
+            display: flex;
+            justify-content: center;
+            min-height: 60px;
+            margin: 15px 0;
+        "></div>
 
-
+        <!-- КНОПКА ВЫХОДА - ТОЛЬКО ДЛЯ АВТОРИЗОВАННЫХ НЕ-АДМИНОВ -->
         <button v-if="!isAdmin && !user.is_guest" @click="logout" class="cat-tab" style="margin-top:5px;">ВЫЙТИ</button>
+        
+        <!-- КНОПКА ПОДДЕРЖКИ - ДЛЯ ВСЕХ НЕ-АДМИНОВ -->
         <button 
             v-if="!isAdmin"
             @click="openSupport" 
@@ -1167,7 +1158,8 @@ body.modal-open {
         </button>
     </div>
 
-    <div v-if="!isAdmin">
+    <!-- БЛОК ЗАКАЗОВ - ТОЛЬКО ДЛЯ НЕ-АДМИНОВ -->
+    <div v-if="!isAdmin && !user.is_guest">
         <h3 class="brand-name" style="font-size: 14px; margin-bottom: 15px;">МОИ ЗАКАЗЫ</h3>
         
         <div v-if="myOrders.length === 0" style="padding:20px; text-align:center; font-size:12px; color: var(--gray);">
@@ -1186,7 +1178,7 @@ body.modal-open {
                 <div style="font-size:10px; color:gray; font-weight: 600;">{{o.date}}</div>
             </div>
         </div>
-    </div> 
+    </div>
     
     <div v-if="isAdmin && user && !user.is_guest" class="admin-section">
         <h2 class="brand-name" style="font-size: 14px; margin-bottom: 20px;">АДМИН-ПАНЕЛЬ</h2>
@@ -2438,6 +2430,16 @@ loadTelegramWidget() {
     
     checkContainer();
 },
+// Загрузить заказы текущего пользователя
+loadUserOrders() {
+    if (!this.user || this.user.is_guest) return;
+    
+    // Фильтруем заказы по ID пользователя
+    this.myOrders = this.allOrders.filter(order => 
+        order.user && order.user.id == this.user.id
+    );
+    console.log(`📦 Загружено ${this.myOrders.length} заказов пользователя`);
+},
 loadTelegramIframe() {
     console.log('🔄 Загрузка iframe виджета...');
     const container = document.getElementById('telegram-login-container');
@@ -2525,29 +2527,32 @@ logout() {
     this.initTelegramLogin();
 },
 handleTelegramAuth(user) {
-        console.log('✅ Успешный вход через Telegram:', user);
-        
-        // Обновляем данные пользователя
-        this.user = {
-            id: user.id,
-            first_name: user.first_name,
-            last_name: user.last_name || '',
-            username: user.username || '',
-            photo_url: user.photo_url || '',
-            is_guest: false
-        };
-        
-        // Проверка на админа
-        if (user.id == this.adminId) {
-            this.isAdmin = true;
-        }
-        
-        // Сохраняем в localStorage
-        localStorage.setItem('user', JSON.stringify(this.user));
-        
-        // Обновляем интерфейс
-        this.$forceUpdate();
-    },
+    console.log('✅ Успешный вход через Telegram:', user);
+    
+    // Обновляем данные пользователя
+    this.user = {
+        id: user.id,
+        first_name: user.first_name,
+        last_name: user.last_name || '',
+        username: user.username || '',
+        photo_url: user.photo_url || '',
+        is_guest: false
+    };
+    
+    // Проверка на админа
+    if (user.id == this.adminId) {
+        this.isAdmin = true;
+    }
+    
+    // Сохраняем в localStorage
+    localStorage.setItem('user', JSON.stringify(this.user));
+    
+    // Загружаем заказы пользователя
+    this.loadUserOrders();
+    
+    // Обновляем интерфейс
+    this.$forceUpdate();
+},
 initTelegramLogin() {
     console.log('🔍 initTelegramLogin вызван!');
     console.log('this.user:', this.user);
@@ -5826,6 +5831,11 @@ mounted() {
     console.log('Admin ID:', this.adminId);
     console.log('User ID:', this.user.id);
     
+    // 👇 ЗАГРУЗКА ЗАКАЗОВ ПОЛЬЗОВАТЕЛЯ (ЕСЛИ АВТОРИЗОВАН)
+    if (this.user && !this.user.is_guest) {
+        this.loadUserOrders();
+    }
+    
     // Восстанавливаем сохраненный адрес
     const savedAddr = localStorage.getItem('naran_last_addr');
     if (savedAddr) this.address = savedAddr;
@@ -5938,6 +5948,11 @@ mounted() {
                         });
                         console.log('✅ Orders loaded:', this.allOrders.length);
                         
+                        // 👇 АВТОМАТИЧЕСКАЯ ЗАГРУЗКА ЗАКАЗОВ ПОЛЬЗОВАТЕЛЯ ПРИ ОБНОВЛЕНИИ
+                        if (this.user && !this.user.is_guest) {
+                            this.loadUserOrders();
+                        }
+                        
                         if (this.tab === 'profile' && this.isAdmin) {
                             this.$nextTick(() => {
                                 setTimeout(() => {
@@ -6010,6 +6025,13 @@ mounted() {
         }
     });
     
+    // 👇 WATCH ДЛЯ АВТОМАТИЧЕСКОЙ ЗАГРУЗКИ ЗАКАЗОВ ПРИ ИЗМЕНЕНИИ allOrders
+    this.$watch('allOrders', () => {
+        if (this.user && !this.user.is_guest) {
+            this.loadUserOrders();
+        }
+    }, { deep: true });
+    
     // Восстанавливаем позицию после загрузки товаров
     this.$watch('products', (newProducts) => {
         if (newProducts.length > 0 && this.tab === 'catalog' && this.catalogScrollPosition > 0 && !this._isRestoring) {
@@ -6028,7 +6050,7 @@ mounted() {
     }, { deep: true });
     
     console.log('=== MOUNTED ЗАВЕРШЕН ===');
-},
+}, 
 
 beforeDestroy() {
     console.log('=== BEFORE DESTROY ===');
