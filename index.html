@@ -1139,18 +1139,23 @@ body.modal-open {
 
         <!-- ВИДЖЕТ ВХОДА - теперь с правильным отображением -->
         <div v-if="user.is_guest" style="margin: 15px 0;">
-            <!-- Кнопка входа через Telegram -->
-            <div id="telegram-login-container" style="
-                display: flex;
-                justify-content: center;
-                min-height: 60px;
-            "></div>
-            
-            <!-- Инструкция для пользователей с блокировщиками рекламы -->
-            <div style="font-size: 12px; color: #666; margin-top: 10px;">
-                Нажмите кнопку "Login with Telegram" для входа
-            </div>
-        </div>
+    <div id="telegram-login-container" style="
+        display: flex;
+        justify-content: center;
+        min-height: 60px;
+    "></div>
+    
+    <!-- ВРЕМЕННАЯ КНОПКА ДЛЯ ТЕСТА -->
+    <button @click="loadTelegramWidget" 
+            style="background: #000; color: #fff; border: none; padding: 10px; margin-top: 10px; width: 100%;">
+        🔄 ЗАГРУЗИТЬ ВИДЖЕТ ВРУЧНУЮ
+    </button>
+    
+    <div style="font-size: 12px; color: #666; margin-top: 10px;">
+        Нажмите кнопку "Login with Telegram" для входа
+    </div>
+</div>
+
 
         <button v-if="!isAdmin && !user.is_guest" @click="logout" class="cat-tab" style="margin-top:5px;">ВЫЙТИ</button>
         <button 
@@ -2092,6 +2097,7 @@ function startVueApp() {
               const appVm = Vue.createApp({
                 data() {
                     return {
+                         _isLoadingWidget: false,
                          botUsername: window.BOT_USERNAME || '',
                         _isRestoring: false, 
                           _scrollBlocked: false,
@@ -2329,13 +2335,14 @@ selVariant() {
             },
     },
   watch: {
-     tab(newVal) {
+     tab(newVal, oldVal) {
         console.log('Вкладка изменена на:', newVal);
-        if (newVal === 'profile' && this.user?.is_guest) {
-            // Перезагружаем виджет при переходе на вкладку профиля
+        // Загружаем виджет только при переключении на profile и если пользователь гость
+        if (newVal === 'profile' && this.user?.is_guest && !this._isLoadingWidget) {
+            console.log('🔄 Переключились на profile, загружаем виджет');
             setTimeout(() => {
                 this.loadTelegramWidget();
-            }, 100);
+            }, 300);
         }
     },
     products: {
@@ -2362,36 +2369,95 @@ selVariant() {
      vib() {
     this.safeHaptic('light');
 },
-lloadTelegramWidget() {
-        console.log('🔄 Загрузка виджета Telegram в профиле...');
-        
-        // Проверяем, есть ли контейнер
-        const container = document.getElementById('telegram-login-container');
-        if (!container) {
-            console.log('❌ Контейнер не найден');
-            return;
-        }
-        
-        // Очищаем контейнер
-        container.innerHTML = '';
-        
-        // Создаем скрипт виджета
-        const script = document.createElement('script');
-        script.async = true;
-        script.src = 'https://telegram.org/js/telegram-widget.js?22';
-        script.setAttribute('data-telegram-login', this.botUsername || 'naranstore_bot');
-        script.setAttribute('data-size', 'large');
-        script.setAttribute('data-radius', '10');
-        script.setAttribute('data-onauth', 'onTelegramLogin(user)');
-        script.setAttribute('data-request-access', 'write');
-        
-        // Обработчики
-        script.onload = () => console.log('✅ Виджет Telegram загружен');
-        script.onerror = (e) => console.error('❌ Ошибка загрузки виджета:', e);
-        
-        container.appendChild(script);
-    },
+loadTelegramWidget() {
+    // Защита от множественных вызовов
+    if (this._isLoadingWidget) {
+        console.log('⏳ Виджет уже загружается, пропускаем...');
+        return;
+    }
     
+    console.log('🔄 Загрузка виджета Telegram из Vue...');
+    this._isLoadingWidget = true;
+    
+    let attempts = 0;
+    const maxAttempts = 10;
+    
+    const checkContainer = async () => {
+        const container = document.getElementById('telegram-login-container');
+        
+        if (container) {
+            console.log('✅ Контейнер найден, размер:', container.offsetWidth, 'x', container.offsetHeight);
+            
+            // Проверяем, не загружен ли уже виджет
+            if (container.querySelector('iframe') || container.querySelector('script[src*="telegram-widget"]')) {
+                console.log('✅ Виджет уже загружен, пропускаем');
+                this._isLoadingWidget = false;
+                return;
+            }
+            
+            // Добавляем стили для красоты
+            container.style.border = 'none';
+            container.style.padding = '5px';
+            container.style.minHeight = '70px';
+            container.style.display = 'flex';
+            container.style.justifyContent = 'center';
+            container.style.alignItems = 'center';
+            
+            // Показываем индикатор загрузки
+            container.innerHTML = '<div style="color:#666; font-family: Montserrat;">Загрузка виджета...</div>';
+            
+            // Вызываем глобальную функцию
+            if (window.loadTelegramWidget) {
+                try {
+                    const result = await window.loadTelegramWidget(
+                        this.botUsername || 'naranstore_bot', 
+                        'telegram-login-container'
+                    );
+                    console.log(`✅ Виджет загружен через: ${result}`);
+                } catch (e) {
+                    console.error('❌ Ошибка загрузки виджета:', e);
+                    container.innerHTML = '<div style="color:#ff3b30; font-size:12px;">❌ Не удалось загрузить виджет входа</div>';
+                }
+            } else {
+                console.error('❌ Глобальная функция loadTelegramWidget не найдена');
+                // Ручная загрузка iframe
+                this.loadTelegramIframe();
+            }
+            
+            this._isLoadingWidget = false;
+            
+        } else if (attempts < maxAttempts) {
+            attempts++;
+            console.log(`⏳ Контейнер не найден, попытка ${attempts}/${maxAttempts}...`);
+            setTimeout(checkContainer, 300);
+        } else {
+            console.error('❌ Контейнер не найден после 10 попыток');
+            this._isLoadingWidget = false;
+        }
+    };
+    
+    checkContainer();
+},
+loadTelegramIframe() {
+    console.log('🔄 Загрузка iframe виджета...');
+    const container = document.getElementById('telegram-login-container');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://oauth.telegram.org/embed/${this.botUsername}?origin=${encodeURIComponent(window.location.origin)}&size=large&request_access=write`;
+    iframe.width = '100%';
+    iframe.height = '65';
+    iframe.style.border = 'none';
+    iframe.style.overflow = 'hidden';
+    iframe.style.borderRadius = '8px';
+    
+    container.appendChild(iframe);
+    console.log('✅ Iframe виджета загружен');
+},
+
+
 total() {
     if (!this.cart || !Array.isArray(this.cart) || this.cart.length === 0) {
         return 0;
@@ -2431,21 +2497,23 @@ async saveUserToFirestore(userData) {
     }
 },
 initTelegramLogin() {
-        console.log('🔍 initTelegramLogin вызван');
-        console.log('user.is_guest:', this.user?.is_guest);
-        console.log('botUsername:', this.botUsername);
+    console.log('🔍 initTelegramLogin вызван!');
+    
+    if (this.user && this.user.is_guest) {
+        console.log('✅ Пользователь гость, показываем виджет');
+        this.showTelegramLogin = true;
         
-        if (this.user && this.user.is_guest) {
-            console.log('✅ Гость - загружаем виджет');
-            
-            // Даем время для рендера DOM
+        // Проверяем, не на вкладке ли profile мы сейчас
+        if (this.tab === 'profile') {
             setTimeout(() => {
                 this.loadTelegramWidget();
-            }, 300);
-        } else {
-            console.log('❌ Пользователь не гость, виджет не нужен');
+            }, 500);
         }
-    },
+    } else {
+        console.log('❌ Пользователь не гость, виджет не нужен');
+        this.showTelegramLogin = false;
+    }
+},
 logout() {
     this.user = { is_guest: true };
     this.isAdmin = false;
@@ -5637,14 +5705,14 @@ mounted() {
     console.log('this.imgbbKey:', this.imgbbKey ? '✅ установлен' : '❌ отсутствует');
     console.log('this.botToken:', this.botToken ? '✅ установлен' : '❌ отсутствует');
     console.log('this.firebaseConfig:', this.firebaseConfig ? '✅ установлен' : '❌ отсутствует');
-    console.log('this.botUsername:', this.botUsername); // <-- ДОБАВЬТЕ ЭТУ СТРОКУ
+    console.log('this.botUsername:', this.botUsername);
     
     console.log('window.ADMIN_ID:', window.ADMIN_ID);
     console.log('window.MAP_KEY:', window.MAP_KEY ? '✅' : '❌');
     console.log('window.IMGBB_API_KEY:', window.IMGBB_API_KEY ? '✅' : '❌');
     console.log('window.BOT_TOKEN:', window.BOT_TOKEN ? '✅' : '❌');
     console.log('window.FIREBASE_CONFIG:', window.FIREBASE_CONFIG ? '✅' : '❌');
-    console.log('window.BOT_USERNAME:', window.BOT_USERNAME); // <-- ДОБАВЬТЕ ЭТУ СТРОКУ
+    console.log('window.BOT_USERNAME:', window.BOT_USERNAME);
     
     if (!this.adminId && window.ADMIN_ID) {
         console.log('🔄 Копируем adminId из window:', window.ADMIN_ID);
@@ -5666,7 +5734,7 @@ mounted() {
         this.botToken = window.BOT_TOKEN;
     }
 
-    if (!this.botUsername && window.BOT_USERNAME) { // <-- ИСПРАВЛЕНО
+    if (!this.botUsername && window.BOT_USERNAME) {
         console.log('🔄 Копируем botUsername из window:', window.BOT_USERNAME);
         this.botUsername = window.BOT_USERNAME;
     }
@@ -5679,7 +5747,7 @@ mounted() {
     console.log('=== ПОСЛЕ КОПИРОВАНИЯ ===');
     console.log('this.adminId:', this.adminId);
     console.log('this.imgbbKey:', this.imgbbKey ? '✅' : '❌');
-    console.log('this.botUsername:', this.botUsername); // <-- ДОБАВЬТЕ ЭТУ СТРОКУ
+    console.log('this.botUsername:', this.botUsername);
     console.log('this.firebaseConfig:', this.firebaseConfig ? '✅' : '❌');
     
     // 1. Безопасная инициализация Telegram
@@ -5765,6 +5833,21 @@ mounted() {
     this.$watch(() => this.products, () => {
         this.catalogActiveColors = {};
     }, { deep: true });
+    
+    // 👇 ДОБАВЛЕННЫЙ ОБРАБОТЧИК СООБЩЕНИЙ ОТ TELEGRAM IFRAME
+    window.addEventListener('message', function(event) {
+        if (event.origin === 'https://oauth.telegram.org') {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.event === 'auth' && window.onTelegramLogin) {
+                    console.log('📩 Получено сообщение от Telegram iframe:', data);
+                    window.onTelegramLogin(data.user);
+                }
+            } catch (e) {
+                console.error('Ошибка обработки сообщения от Telegram:', e);
+            }
+        }
+    });
     
     // 6. Инициализация Firebase с защитой от повторных вызовов
     let firebaseInitAttempts = 0;
@@ -5945,7 +6028,7 @@ mounted() {
     }, { deep: true });
     
     console.log('=== MOUNTED ЗАВЕРШЕН ===');
-}, 
+},
 
 beforeDestroy() {
     console.log('=== BEFORE DESTROY ===');
@@ -6055,29 +6138,69 @@ console.log('✅ Vue приложение запущено');
     }
 })();
 </script>
+<!-- Глобальная функция для обработки авторизации Telegram -->
 <script>
-// Глобальная функция для callback от Telegram
+// Определяем глобальную функцию ДО всего
 window.onTelegramLogin = function(user) {
-    console.log('🎯 Telegram callback получен:', user);
-    
-    // Пытаемся найти Vue приложение
-    if (window.app) {
+    console.log('✅ Telegram авторизация:', user);
+    if (window.app && window.app.handleTelegramAuth) {
         window.app.handleTelegramAuth(user);
     } else {
-        // Если Vue еще не готов, сохраняем в localStorage
-        console.log('⏳ Vue не готов, сохраняем данные');
         localStorage.setItem('telegram_pending_user', JSON.stringify(user));
     }
 }
 
-// Проверяем сохраненные данные при загрузке
-document.addEventListener('DOMContentLoaded', function() {
-    const pendingUser = localStorage.getItem('telegram_pending_user');
-    if (pendingUser) {
-        console.log('📦 Найден ожидающий пользователь');
-        // Оставляем для Vue приложения
-    }
-});
+// Функция для загрузки виджета (будет доступна глобально)
+window.loadTelegramWidget = function(botUsername, containerId) {
+    return new Promise((resolve, reject) => {
+        console.log('🔄 Загрузка виджета Telegram...');
+        
+        const container = document.getElementById(containerId);
+        if (!container) {
+            console.error('❌ Контейнер не найден');
+            return reject('Контейнер не найден');
+        }
+        
+        // Очищаем контейнер
+        container.innerHTML = '';
+        
+        // Пробуем загрузить обычный скрипт
+        const script = document.createElement('script');
+        script.async = true;
+        script.src = 'https://telegram.org/js/telegram-widget.js?22';
+        script.setAttribute('data-telegram-login', botUsername);
+        script.setAttribute('data-size', 'large');
+        script.setAttribute('data-radius', '10');
+        script.setAttribute('data-onauth', 'onTelegramLogin(user)');
+        script.setAttribute('data-request-access', 'write');
+        
+        script.onload = () => {
+            console.log('✅ Виджет загружен через скрипт');
+            resolve('script');
+        };
+        
+        script.onerror = (e) => {
+            console.warn('⚠️ Ошибка загрузки скрипта, пробуем iframe...');
+            
+            // Если скрипт не загрузился, используем iframe
+            container.innerHTML = '';
+            
+            const iframe = document.createElement('iframe');
+            iframe.src = `https://oauth.telegram.org/embed/${botUsername}?origin=${encodeURIComponent(window.location.origin)}&size=large&request_access=write`;
+            iframe.width = '100%';
+            iframe.height = '65';
+            iframe.style.border = 'none';
+            iframe.style.overflow = 'hidden';
+            iframe.style.borderRadius = '8px';
+            
+            container.appendChild(iframe);
+            console.log('✅ Виджет загружен через iframe');
+            resolve('iframe');
+        };
+        
+        container.appendChild(script);
+    });
+}
 </script>
 </body>
 </html>
