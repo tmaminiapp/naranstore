@@ -1136,7 +1136,9 @@ body.modal-open {
             {{ isAdmin ? 'АДМИНИСТРАТОР' : (user.first_name || 'Клиент') }}
         </div>
 
-        
+        <div v-if="user.is_guest" id="telegram-login-container" style="margin: 15px 0;"></div>
+
+         <button v-if="!isAdmin && !user.is_guest" @click="logout" class="cat-tab" style="margin-top:5px;">ВЫЙТИ</button>
          <button 
             v-if="!isAdmin"
             @click="openSupport" 
@@ -1862,40 +1864,131 @@ body.modal-open {
         Timestamp
     } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
     import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
+    import { setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
 
 const CONFIG_URL = '/config.json';
 let ADMIN_ID = null;
 let MAP_KEY = null;
 let IMGBB_API_KEY = null;
+let BOT_USERNAME = null;  
 let BOT_TOKEN = null;
 let FIREBASE_CONFIG = null;
 
 async function loadConfig() {
-    console.log('=== ЛОКАЛЬНЫЙ РЕЖИМ ===');
+    console.log('=== ЗАГРУЗКА КОНФИГУРАЦИИ ===');
     
-    // ВАШИ РЕАЛЬНЫЕ ДАННЫЕ
-    ADMIN_ID = 387881523;
-    MAP_KEY = 'a3fb6133-4bcf-46d3-9a05-c7d8b5812144';
-    IMGBB_API_KEY = '4d4ab43d9b15c3dbadb9058518e4db23';
-    BOT_TOKEN = '8546116032:AAEeKb3J5o-revyZs7KhTV-VoO609tRV0Ek';
-    FIREBASE_CONFIG = {
-        apiKey: "AIzaSyC6fihIMtOYZuPh-db3Tc6eiRgSikzydVw",
-        authDomain: "naran-80077.firebaseapp.com",
-        projectId: "naran-80077",
-        storageBucket: "naran-80077.firebasestorage.app",
-        messagingSenderId: "901156477154",
-        appId: "1:901156477154:web:9bf2d604496726b59ae6bb"
-    };
+    // Проверяем, не в локальном ли мы режиме (для разработки)
+    const isLocalMode = window.location.hostname === 'localhost' || 
+                        window.location.hostname === '127.0.0.1' ||
+                        window.location.protocol === 'file:';
     
-    // Дублируем в window для безопасности
-    window.ADMIN_ID = ADMIN_ID;
-    window.MAP_KEY = MAP_KEY;
-    window.IMGBB_API_KEY = IMGBB_API_KEY;
-    window.BOT_TOKEN = BOT_TOKEN;
-    window.FIREBASE_CONFIG = FIREBASE_CONFIG;
+    // ЛОКАЛЬНЫЙ РЕЖИМ - ключи прямо в коде (только для разработки!)
+    if (isLocalMode) {
+        console.log('📱 ЛОКАЛЬНЫЙ РЕЖИМ РАЗРАБОТКИ');
+        
+        // ВАШИ РЕАЛЬНЫЕ ДАННЫЕ (только для локальной разработки)
+        ADMIN_ID = 387881523;
+        MAP_KEY = 'a3fb6133-4bcf-46d3-9a05-c7d8b5812144';
+        IMGBB_API_KEY = '4d4ab43d9b15c3dbadb9058518e4db23';
+        BOT_USERNAME = 'naranstore_bot'; 
+        BOT_TOKEN = '8546116032:AAEeKb3J5o-revyZs7KhTV-VoO609tRV0Ek';
+        FIREBASE_CONFIG = {
+            apiKey: "AIzaSyC6fihIMtOYZuPh-db3Tc6eiRgSikzydVw",
+            authDomain: "naran-80077.firebaseapp.com",
+            projectId: "naran-80077",
+            storageBucket: "naran-80077.firebasestorage.app",
+            messagingSenderId: "901156477154",
+            appId: "1:901156477154:web:9bf2d604496726b59ae6bb"
+        };
+        
+        // Дублируем в window для доступа из Vue
+        window.ADMIN_ID = ADMIN_ID;
+        window.MAP_KEY = MAP_KEY;
+        window.IMGBB_API_KEY = IMGBB_API_KEY;
+        window.BOT_USERNAME = BOT_USERNAME;
+        window.BOT_TOKEN = BOT_TOKEN;
+        window.FIREBASE_CONFIG = FIREBASE_CONFIG;
+        
+        console.log('✅ Локальный конфиг загружен');
+        return true;
+    }
     
-    console.log('✅ Локальный конфиг загружен');
-    return true;
+    // ПРОДАКШН РЕЖИМ - загружаем из config.json (безопасно)
+    try {
+        console.log('🌐 ПРОДАКШН РЕЖИМ, загружаем config.json');
+        console.log('URL:', CONFIG_URL);
+        
+        // Таймаут 10 секунд
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            controller.abort('Timeout after 10 seconds');
+        }, 10000);
+        
+        const response = await fetch(CONFIG_URL, {
+            signal: controller.signal,
+            headers: {
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache'
+            }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        console.log('Статус ответа:', response.status, response.statusText);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const config = await response.json();
+        console.log('✅ Конфигурация успешно загружена из config.json');
+        
+        // Присваиваем значения
+        ADMIN_ID = config.adminId;
+        MAP_KEY = config.mapKey;
+        IMGBB_API_KEY = config.imgbbKey;
+        BOT_USERNAME = config.botUsername;
+        BOT_TOKEN = config.botToken;
+        FIREBASE_CONFIG = config.firebaseConfig;
+        
+        // Дублируем в window для доступа из Vue
+        window.ADMIN_ID = ADMIN_ID;
+        window.MAP_KEY = MAP_KEY;
+        window.IMGBB_API_KEY = IMGBB_API_KEY;
+        window.BOT_USERNAME = BOT_USERNAME;
+        window.BOT_TOKEN = BOT_TOKEN;
+        window.FIREBASE_CONFIG = FIREBASE_CONFIG;
+        
+        console.log('✅ Продакшн конфиг загружен');
+        return true;
+        
+    } catch (error) {
+        console.error('❌ Ошибка загрузки конфигурации:', error);
+        
+        // В продакшне не используем запасные ключи из кода!
+        // Просто показываем ошибку
+        const appElement = document.getElementById('app');
+        if (appElement) {
+            appElement.innerHTML = `
+                <div style="text-align:center; padding:50px; font-family: Montserrat;">
+                    <h2 style="color: #ff3b30;">❌ Ошибка подключения</h2>
+                    <p style="margin: 20px 0;">Не удалось загрузить конфигурацию с сервера.</p>
+                    <p style="font-size: 14px; color: #666;">
+                        Проверьте наличие файла <b>config.json</b> на сервере.
+                    </p>
+                    <button onclick="location.reload()" 
+                            style="background: #000; color: #fff; border: none; 
+                                   padding: 15px 30px; margin-top: 20px; 
+                                   font-weight: 800; cursor: pointer;">
+                        🔄 ПОВТОРИТЬ
+                    </button>
+                </div>
+            `;
+        }
+        
+        return false;
+    }
 }
 // Функция запуска Vue приложения
 function startVueApp() {
@@ -1978,6 +2071,7 @@ function startVueApp() {
               const appVm = Vue.createApp({
                 data() {
                     return {
+                         botUsername: window.BOT_USERNAME || '',
                         _isRestoring: false, 
                           _scrollBlocked: false,
                            _scrollPosition: 0,
@@ -2258,7 +2352,85 @@ total() {
     
     return itemsTotal;
 },
+async saveUserToFirestore(userData) {
+    if (!userData || userData.is_guest) return;
+    try {
+        const userRef = doc(window.db, "users", String(userData.id));
+        await setDoc(userRef, {
+            id: userData.id,
+            first_name: userData.first_name || '',
+            last_name: userData.last_name || '',
+            username: userData.username || '',
+            photo_url: userData.photo_url || '',
+            last_seen: serverTimestamp(),
+            updatedAt: serverTimestamp()
+        }, { merge: true });
+        console.log('✅ Пользователь сохранён в Firestore');
+    } catch (e) {
+        console.error('❌ Ошибка сохранения пользователя:', e);
+    }
+},
+logout() {
+    this.user = { is_guest: true };
+    this.isAdmin = false;
+    localStorage.removeItem('naran_user');
+    // Удаляем виджет, если он есть
+    const container = document.getElementById('telegram-login-container');
+    if (container) container.innerHTML = '';
+    // Переинициализируем виджет (он снова появится)
+    this.initTelegramLogin();
+},
+handleTelegramAuth(tgData) {
+    // tgData приходит из виджета: { id, first_name, username, photo_url, auth_date, hash }
+    const user = {
+        id: tgData.id,
+        first_name: tgData.first_name || '',
+        username: tgData.username || '',
+        photo_url: tgData.photo_url || '',
+        is_guest: false
+    };
+    this.user = user;
+    this.isAdmin = (Number(user.id) === Number(this.adminId));
+    
+    // Сохраняем в localStorage для следующих сессий
+    localStorage.setItem('naran_user', JSON.stringify(user));
+    
+    // Сохраняем в Firestore
+    this.saveUserToFirestore(user);
+    
+    // Скрываем виджет (можно просто удалить контейнер)
+    const container = document.getElementById('telegram-login-container');
+    if (container) container.innerHTML = '';
+},
+initTelegramLogin() {
+    // Не загружаем, если пользователь уже авторизован
+    if (this.user && !this.user.is_guest) return;
+    // Не загружаем внутри Telegram WebApp (там данные уже есть)
+    if (window.Telegram?.WebApp) return;
+    if (!this.botUsername) return;
 
+    const container = document.getElementById('telegram-login-container');
+    if (!container) return;
+
+    // Очищаем контейнер на случай повторного вызова
+    container.innerHTML = '';
+
+    // Создаём скрипт виджета
+    const script = document.createElement('script');
+    script.src = 'https://telegram.org/js/telegram-widget.js?22';
+    script.setAttribute('data-telegram-login', this.botUsername);
+    script.setAttribute('data-size', 'large');
+    script.setAttribute('data-onauth', 'onTelegramAuth(user)');
+    script.setAttribute('data-request-access', 'write');
+    script.async = true;
+
+    // Глобальный колбэк
+    window.onTelegramAuth = (user) => {
+        this.handleTelegramAuth(user);
+    };
+
+    container.appendChild(script);
+},
 removeEditImage(imgIdx) {
     if (confirm("Удалить это фото из товара?")) {
         this.editImages.splice(imgIdx, 1);
@@ -4712,8 +4884,9 @@ async checkout() {
     this.loading = true;
     
     try {
-        const tgUser = window.Telegram.WebApp?.initDataUnsafe?.user;
-        const username = tgUser?.username ? `@${tgUser.username}` : 'нет ника';
+        const tgUser = (this.user && !this.user.is_guest) ? this.user : null;
+        const userId = tgUser?.id || 0;
+      const username = tgUser?.username ? `@${tgUser.username}` : 'нет ника';
 
         // Генерация номера заказа
         const now = new Date();
@@ -4745,7 +4918,7 @@ async checkout() {
             status: 'Новый',
             createdAt: window.fb?.serverTimestamp ? window.fb.serverTimestamp() : new Date(),
             user: {
-                id: tgUser?.id || 0,
+                 id: userId,
                 username: username
             }
         };
@@ -5404,16 +5577,52 @@ updateChart() {
     console.log('this.imgbbKey:', this.imgbbKey ? '✅' : '❌');
     console.log('this.firebaseConfig:', this.firebaseConfig ? '✅' : '❌');
     
-    // 1. Безопасная инициализация Telegram
-    if (window.Telegram?.WebApp) {
+   // 2. Данные пользователя - СНАЧАЛА проверяем Telegram WebApp
+if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
+    // Если открыто в Telegram - используем данные оттуда
+    const tgUser = window.Telegram.WebApp.initDataUnsafe.user;
+    this.user = {
+        id: tgUser.id,
+        first_name: tgUser.first_name || '',
+        username: tgUser.username || '',
+        photo_url: tgUser.photo_url || '',
+        is_guest: false
+    };
+    console.log('✅ Пользователь из Telegram WebApp:', this.user);
+} else {
+    // Если не в Telegram - пробуем загрузить из localStorage
+    const savedUser = localStorage.getItem('naran_user');
+    if (savedUser) {
         try {
-            window.Telegram.WebApp.ready();
-            window.Telegram.WebApp.expand();
-            console.log('✅ Telegram WebApp initialized');
+            const parsed = JSON.parse(savedUser);
+            this.user = parsed;
+            console.log('✅ Пользователь загружен из localStorage:', this.user);
         } catch (e) {
-            console.warn("Telegram WebApp error:", e);
+            console.error('Ошибка парсинга savedUser:', e);
+            this.user = { is_guest: true };
         }
+    } else {
+        // Если ничего нет - создаем гостя
+        this.user = { 
+            id: null, 
+            first_name: 'Гость',
+            is_guest: true 
+        };
     }
+}
+
+// 3. Проверяем, админ ли пользователь
+this.isAdmin = (this.user && !this.user.is_guest && Number(this.user.id) === Number(this.adminId));
+
+// 4. Сохраняем пользователя в Firestore (если это не гость)
+if (this.user && !this.user.is_guest) {
+    this.saveUserToFirestore(this.user);
+}
+
+// 5. Инициализируем виджет Telegram Login (только для гостей вне Telegram)
+this.$nextTick(() => {
+    this.initTelegramLogin();
+});
     
     // 2. Данные пользователя с fallback
     this.user = window.Telegram?.WebApp?.initDataUnsafe?.user;
