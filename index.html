@@ -1860,11 +1860,11 @@ body.modal-open {
         where, 
         getDoc, 
         getDocs,
+        setDoc,   
         serverTimestamp,
         Timestamp
     } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
     import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
-    import { setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 
 const basePath = window.location.pathname.includes('/') 
@@ -2053,6 +2053,7 @@ function startVueApp() {
             window.fb = {
                 collection: collection,
                 addDoc: addDoc,
+                setDoc: setDoc, 
                 onSnapshot: onSnapshot,
                 query: query,
                 getDoc: getDoc,
@@ -5583,43 +5584,63 @@ updateChart() {
     console.log('this.imgbbKey:', this.imgbbKey ? '✅' : '❌');
     console.log('this.firebaseConfig:', this.firebaseConfig ? '✅' : '❌');
     
-   // 2. Данные пользователя - СНАЧАЛА проверяем Telegram WebApp
-if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
-    // Если открыто в Telegram - используем данные оттуда
-    const tgUser = window.Telegram.WebApp.initDataUnsafe.user;
-    this.user = {
-        id: tgUser.id,
-        first_name: tgUser.first_name || '',
-        username: tgUser.username || '',
-        photo_url: tgUser.photo_url || '',
-        is_guest: false
-    };
-    console.log('✅ Пользователь из Telegram WebApp:', this.user);
-} else {
-    // Если не в Telegram - пробуем загрузить из localStorage
-    const savedUser = localStorage.getItem('naran_user');
-    if (savedUser) {
+    if (window.Telegram?.WebApp) {
         try {
-            const parsed = JSON.parse(savedUser);
-            this.user = parsed;
-            console.log('✅ Пользователь загружен из localStorage:', this.user);
+            window.Telegram.WebApp.ready();
+            window.Telegram.WebApp.expand();
+            console.log('✅ Telegram WebApp initialized');
         } catch (e) {
-            console.error('Ошибка парсинга savedUser:', e);
-            this.user = { is_guest: true };
+            console.warn("Telegram WebApp error:", e);
         }
-    } else {
-        // Если ничего нет - создаем гостя
-        this.user = { 
-            id: null, 
-            first_name: 'Гость',
-            is_guest: true 
-        };
     }
-}
+    
+    // 2. ЗАГРУЗКА ПОЛЬЗОВАТЕЛЯ (исправлено!)
+    // Сначала проверяем, есть ли пользователь в Telegram WebApp
+    if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
+        // Если открыто в Telegram
+        const tgUser = window.Telegram.WebApp.initDataUnsafe.user;
+        this.user = {
+            id: tgUser.id,
+            first_name: tgUser.first_name || '',
+            username: tgUser.username || '',
+            photo_url: tgUser.photo_url || '',
+            is_guest: false
+        };
+        console.log('✅ Пользователь из Telegram WebApp:', this.user);
+    } else {
+        // Если не в Telegram - пробуем загрузить из localStorage
+        const savedUser = localStorage.getItem('naran_user');
+        if (savedUser) {
+            try {
+                const parsed = JSON.parse(savedUser);
+                this.user = parsed;
+                console.log('✅ Пользователь загружен из localStorage:', this.user);
+            } catch (e) {
+                console.error('Ошибка парсинга savedUser:', e);
+                this.user = { is_guest: true };
+            }
+        } else {
+            // Если ничего нет - создаем гостя
+            this.user = { 
+                id: null, 
+                first_name: 'Гость',
+                is_guest: true 
+            };
+        }
+    }
+ 
 
-// 3. Проверяем, админ ли пользователь
 this.isAdmin = (this.user && !this.user.is_guest && Number(this.user.id) === Number(this.adminId));
 
+    // 4. Сохраняем пользователя в Firestore (если это не гость)
+    if (this.user && !this.user.is_guest) {
+        this.saveUserToFirestore(this.user);
+    }
+
+    // 5. Инициализируем виджет Telegram Login (только для гостей вне Telegram)
+    this.$nextTick(() => {
+        this.initTelegramLogin();
+    });
 // 4. Сохраняем пользователя в Firestore (если это не гость)
 if (this.user && !this.user.is_guest) {
     this.saveUserToFirestore(this.user);
