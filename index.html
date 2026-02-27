@@ -524,6 +524,16 @@
         gap: 8px; 
         margin: 15px 0; 
     }
+    /* Добавьте в конец стилей */
+.telegram-webview .product-image {
+    content-visibility: auto;
+    contain-intrinsic-size: 200px;
+}
+
+.telegram-webview .cart-img {
+    content-visibility: auto;
+    contain-intrinsic-size: 70px 90px;
+}
 
     /* ========== ORDERS ========== */
     .order-card { 
@@ -586,6 +596,7 @@
     transform: scale(0.95);
     box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
+
 .image-loading {
     background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
     background-size: 200% 100%;
@@ -788,7 +799,30 @@
         border-radius: 8px; /* Более мягкие углы на мобильных */
     }
 }
+/* Добавьте в конец стилей */
+.no-transition {
+    transition: none !important;
+}
 
+.catalog-container {
+    will-change: scroll-position;
+}
+/* Для правильной блокировки скролла на мобильных */
+body.modal-open {
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+
+/* Плавные переходы */
+.modal {
+    transition: opacity 0.2s ease;
+}
 </style>
 </head>
 <body>
@@ -1653,7 +1687,8 @@
                 <button @click="printOrder(o)" style="width: 46px; height: 46px; border-radius: 12px; border: 1px solid #eee; background: #fff; font-size: 20px; display: flex; align-items: center; justify-content: center;">📄</button>
             </div>
         </div>      
-    </div> </div> </main>
+    </div> </div> 
+</main>
 
   <div v-if="selP" class="modal" style="z-index: 5000;">
     <button class="close-modal" @click="closeProductModal()">✕</button>
@@ -1791,7 +1826,10 @@
                 <span v-else>ВЫБЕРИТЕ РАЗМЕР</span>
             </button>
         </div>
-    </div> </div> <nav class="bottom-nav">
+    </div> 
+</div> 
+    
+    <nav class="bottom-nav">
     <button v-for="btn in nav" :key="btn.id" 
         @click="setTab(btn.id)" 
         :class="['nav-item', {active: tab === btn.id}]"> 
@@ -1802,6 +1840,7 @@
         <span>{{btn.label}}</span>
     </button>
 </nav>
+
 </div>
 
 <script type="module">
@@ -1939,6 +1978,16 @@ function startVueApp() {
               const appVm = Vue.createApp({
                 data() {
                     return {
+                        _isRestoring: false, 
+                          _scrollBlocked: false,
+                           _scrollPosition: 0,
+                         scrollTimeout: null,
+                          scrollHandler: null,
+                          savedScrollPosition: 0, 
+                          scrollContainer: 'main.container', 
+                          catalogScrollPosition: 0,
+                            isModalOpen: false,
+                        isTelegramWebView: !!window.Telegram?.WebApp,
                          isCheckingOut: false,
                         cachedTotalValue: 0,
                         lastCartLength: 0,
@@ -2186,10 +2235,8 @@ selVariant() {
     }
 },
     methods: {
-       vib() { 
-    if (window.Telegram?.WebApp?.HapticFeedback) {
-        window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
-    }
+     vib() {
+    this.safeHaptic('light');
 },
 total() {
     if (!this.cart || !Array.isArray(this.cart) || this.cart.length === 0) {
@@ -2850,8 +2897,8 @@ showTempMessage(text) {
         }
     }, 2000);
 },
-       setTab(id) {
-    if (this.vib) this.vib(); 
+    setTab(id) {
+    this.vib(); 
     this.tab = id;
 
     if (id === 'favs') {
@@ -2860,16 +2907,21 @@ showTempMessage(text) {
         });
     }
 
-    // Если перешли в профиль, рисуем график
     if (id === 'profile') {
         this.$nextTick(() => {
-            // Даем достаточно времени для рендеринга DOM
             setTimeout(() => {
-                if (this.isAdmin) { // Важно: проверяем, что это админ
+                if (this.isAdmin) {
                     this.updateChart();
                 }
-            }, 300); // Увеличиваем время ожидания
+            }, 300);
         });
+    }
+    
+    // При возврате в каталог - восстанавливаем позицию
+    if (id === 'catalog' && this.catalogScrollPosition > 0) {
+        setTimeout(() => {
+            window.scrollTo(0, this.catalogScrollPosition);
+        }, 50);
     }
 },
 // Проверяет, выбран ли размер у товара
@@ -3540,9 +3592,27 @@ getProductImages(product) {
     }
 },
 
-     openProduct(p) {
+ openProduct(p) {
+    // Сохраняем позицию ПЕРЕД открытием
+    if (this.tab === 'catalog' && !this.selP) {
+        this._scrollPosition = window.scrollY;
+        this.catalogScrollPosition = this._scrollPosition;
+        console.log('📌 Сохранена позиция каталога:', this.catalogScrollPosition);
+    }
     
-    window.scrollTo(0,0);
+    // Блокируем скролл для всех устройств
+    this._scrollBlocked = true;
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${this._scrollPosition}px`;
+    document.body.style.width = '100%';
+    document.body.style.height = '100%';
+    
+    // Устанавливаем флаг открытой модалки
+    this.isModalOpen = true;
+    
+    window.scrollTo(0, 0);
+    
     // 1. Находим первый НЕ скрытый вариант
     let firstVisibleIndex = 0;
     if (p.variants && Array.isArray(p.variants)) {
@@ -3554,13 +3624,10 @@ getProductImages(product) {
         }
     }
     
-    // 1. Сначала сбрасываем индекс
     this.currentVariantIndex = firstVisibleIndex;
 
-    // 2. Делаем глубокую копию
     let productCopy = JSON.parse(JSON.stringify(p));
 
-    // 3. ПРОВЕРКА: Если товар старый
     if (!productCopy.variants || !Array.isArray(productCopy.variants) || productCopy.variants.length === 0) {
         productCopy.variants = [{
             color: productCopy.color || 'Стандарт',
@@ -3576,13 +3643,9 @@ getProductImages(product) {
         }
     }
 
-    // 4. Гарантируем наличие индекса анимации
     productCopy.aIdx = 0;
-
-    // 5. Сохраняем в selP (это покажет модальное окно через v-if="selP")
     this.selP = productCopy;
 
-    // 6. Выбор размера по умолчанию
     const firstVar = this.selP.variants[0];
     if (firstVar && firstVar.stocks) {
         const availableSize = Object.keys(firstVar.stocks).find(sz => firstVar.stocks[sz] > 0);
@@ -3591,12 +3654,10 @@ getProductImages(product) {
         this.selP.tempSize = null;
     }
 
-    // 7. Блокируем прокрутку основной страницы
-    document.body.style.overflow = 'hidden';
-
-    // 8. Вибрация
     if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
+        document.body.classList.add('telegram-webview');
+        window.Telegram.WebApp.ready();
+        window.Telegram.WebApp.expand();
     }
 },
         isFav(p) { return p && this.favorites.includes(p.id); },
@@ -3612,12 +3673,10 @@ getProductImages(product) {
             localStorage.setItem('naran_favs_v3', JSON.stringify(this.favorites));
         },
 
-    addToCart(p) {
+ addToCart(p) {
     if (!p) return;
 
     try {
-        // 1. ОПРЕДЕЛЯЕМ ВАРИАНТ (ЦВЕТ)
-        // Гарантируем, что индекс — это число, чтобы избежать ошибок с массивом
         const vIdx = Number(this.currentVariantIndex) || 0;
         const variant = (p.variants && p.variants[vIdx]) ? p.variants[vIdx] : null;
 
@@ -3626,29 +3685,21 @@ getProductImages(product) {
             return;
         }
 
-        // ИСПРАВЛЕНО: Проверяем оба варианта написания (stock и stocks) без дублей
         const currentStock = variant.stock || variant.stocks || {};
 
-        // 2. ОПРЕДЕЛЯЕМ РАЗМЕР
         let finalSize = p.tempSize;
-        
-        // Если размер не выбран, берем первый доступный из объекта stock
         if (!finalSize) {
             finalSize = Object.keys(currentStock).find(sz => currentStock[sz] > 0);
         }
 
-        // Проверка: есть ли такой размер и не пуст ли склад
         if (!finalSize || !currentStock[finalSize] || currentStock[finalSize] <= 0) {
             alert('Этого размера сейчас нет в наличии');
             return;
         }
 
-        // 3. УНИКАЛЬНЫЙ ID (ID + Цвет + Размер)
-        // Заменяем пробелы на подчеркивания в ID для стабильности ссылок
         const finalColor = variant.color || 'Стандарт';
         const cartId = `${p.id}_${finalColor}_${finalSize}`.replace(/\s+/g, '_');
 
-        // 4. ОБНОВЛЕНИЕ ИЛИ ДОБАВЛЕНИЕ
         const exist = this.cart.find(i => i.cartId === cartId);
 
         if (exist) {
@@ -3664,7 +3715,6 @@ getProductImages(product) {
                 cartId: cartId,
                 title: p.title || 'Товар',
                 price: Number(p.price) || 0,
-                // Безопасно берем фото именно этого варианта
                 img: (variant.images && variant.images[0]) ? variant.images[0] : (p.images ? p.images[0] : ''),
                 selSize: finalSize,
                 selColor: finalColor,
@@ -3672,32 +3722,64 @@ getProductImages(product) {
             });
         }
         
-        // 5. ЭФФЕКТЫ И СОХРАНЕНИЕ
         this.saveCart();
+
+        // Сохраняем позицию
+        const savedPosition = this._scrollPosition || this.catalogScrollPosition;
+        console.log('📌 Сохраненная позиция перед закрытием:', savedPosition);
         
-        // Тактильный отклик Telegram
-        if (window.Telegram?.WebApp?.HapticFeedback) {
-            window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-        }
-
+        // Сбрасываем все
+        this._scrollBlocked = false;
+        this.selP = null;
+        if (p) p.tempSize = null; 
+        this.currentVariantIndex = 0;
+        
+        // Разблокируем скролл
+        document.body.style.overflow = '';
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.width = '';
+        document.body.style.height = '';
+        
+        this._isRestoring = true;
+        
         this.showCartNotify = true;
-        setTimeout(() => { this.showCartNotify = false; }, 2000);
+        setTimeout(() => { 
+            this.showCartNotify = false; 
+        }, 2000);
 
-        // 6. ЗАКРЫТИЕ МОДАЛКИ И СБРОС ВЫБОРА
+        // ⭐ ЕДИНСТВЕННОЕ МЕСТО ВОССТАНОВЛЕНИЯ
         setTimeout(() => {
-            this.selP = null;
-            // Сбрасываем временный размер у объекта, чтобы при следующем открытии он был чист
-            if (p) p.tempSize = null; 
-            // Сбрасываем выбор цвета на первый по умолчанию
-            this.currentVariantIndex = 0; 
-        }, 300);
+            if (this.tab === 'catalog' && savedPosition > 0) {
+                window.scrollTo({
+                    top: savedPosition,
+                    behavior: 'instant'
+                });
+                console.log('✅ Восстановлена позиция:', savedPosition);
+            }
+            
+            setTimeout(() => {
+                this._isRestoring = false;
+                this._scrollPosition = 0;
+            }, 300);
+        }, 150);
+
+        try {
+            if (window.Telegram?.WebApp?.HapticFeedback) {
+                const version = window.Telegram.WebApp.version || '6.0';
+                if (parseFloat(version) >= 6.1) {
+                    window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+                }
+            }
+        } catch (e) {}
 
     } catch (err) {
-        // Защита от "белого экрана": если внутри функции что-то пойдет не так,
-        // ошибка выведется в консоль, а не "уронит" всё приложение.
         console.error("Ошибка в addToCart:", err);
+        this._isRestoring = false;
+        this._scrollBlocked = false;
     }
 },
+
 getSizes(p) {
     if (p.variants && p.variants[0] && p.variants[0].stocks) {
         return Object.keys(p.variants[0].stocks);
@@ -3721,12 +3803,11 @@ removePhoto(index) {
         this.newP.localFiles.splice(index, 1);
     }
 },
-// ИЛИ просто удалите этот метод, если не используется
 quickAddToCart(p) {
+    this.saveScrollPosition();
     if (!p) return;
     this.vib();
 
-    // Получаем активный ВИДИМЫЙ вариант
     const visibleVariants = this.getVisibleVariants(p);
     const activeIndex = this.getActiveColorIndex(p);
     const variant = visibleVariants[activeIndex];
@@ -3735,35 +3816,25 @@ quickAddToCart(p) {
         return this.openProduct(p);
     }
     
-    // Используем variant вместо p.variants[0]
     const currentStock = variant.stocks || variant.stock || {};
 
-    // 2. ОПРЕДЕЛЯЕМ РАЗМЕР
-    // Если клиент кликнул на чип в каталоге — берем его (tempSize)
-    // Если нет — ищем первый размер, где остаток > 0
     let selSize = p.tempSize;
     if (!selSize) {
         selSize = Object.keys(currentStock).find(sz => currentStock[sz] > 0);
     }
 
-    // Если размеров нет в наличии — открываем карточку товара, чтобы клиент сам посмотрел
     if (!selSize || currentStock[selSize] <= 0) {
         return this.openProduct(p);
     }
 
-    // 3. ПРОВЕРКА СКРЫТЫХ РАЗМЕРОВ (если у тебя есть такая логика)
     if (p.hiddenSizes && p.hiddenSizes.includes(String(selSize))) {
         return; 
     }
 
-    // 4. ФОРМИРУЕМ УНИКАЛЬНЫЙ ID (ID товара + Цвет + Размер)
     const cartId = `${p.id}_${variant.color}_${selSize}`;
-    
-    // 5. ДОБАВЛЕНИЕ В КОРЗИНУ
     const exist = this.cart.find(i => i.cartId === cartId);
     
     if (exist) {
-        // Проверяем, не превышаем ли мы остаток на складе
         if (exist.qty < (currentStock[selSize] || 99)) {
             exist.qty++;
         } else {
@@ -3773,56 +3844,110 @@ quickAddToCart(p) {
             return;
         }
     } else {
-        // Добавляем новый товар в корзину
         this.cart.push({ 
-        id: p.id,
-        cartId: cartId,
-        title: p.title,
-        price: Number(p.price),
-        // Берем фото из активного ВИДИМОГО варианта
-        img: variant.images[0] || (p.images ? p.images[0] : ''),
-        selSize: selSize,
-        selColor: variant.color,
-        qty: 1
-    });
+            id: p.id,
+            cartId: cartId,
+            title: p.title,
+            price: Number(p.price),
+            img: variant.images[0] || (p.images ? p.images[0] : ''),
+            selSize: selSize,
+            selColor: variant.color,
+            qty: 1
+        });
     }
 
     this.saveCart();
     
-    // Telegram фидбек
     if (window.Telegram?.WebApp?.HapticFeedback) {
-        window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+        try {
+            window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+        } catch (e) {}
     }
     
-    // Анимация плашки "Добавлено"
     this.showCartNotify = true;
     setTimeout(() => { this.showCartNotify = false; }, 2000);
+    
+    // Отключаем автосохранение перед восстановлением
+    this._isRestoring = true;
+    
+    setTimeout(() => {
+        this.restoreScrollPosition();
+    }, 50);
 },
-   changeQty(item, delta) {
-    // ОПТИМИЗАЦИЯ 1: Мгновенное обновление UI (без задержки)
+  changeQty(item, delta) {
+    // Для Telegram WebView используем более щадящий режим
+    if (this.isTelegramWebView) {
+        // Микрозадержка для снятия нагрузки с интерфейса
+        setTimeout(() => {
+            this._processQtyChange(item, delta);
+        }, 10);
+    } else {
+        this._processQtyChange(item, delta);
+    }
+},
+saveScrollPosition() {
+    // Сохраняем ТОЛЬКО если не заблокирован скролл
+    if (this.tab === 'catalog' && !this._isRestoring && !this._scrollBlocked) {
+        const saved = window.scrollY;
+        if (saved > 0) {
+            this.catalogScrollPosition = saved;
+            this._scrollPosition = saved;
+            console.log('📌 Сохранена позиция каталога:', this.catalogScrollPosition);
+        }
+    }
+},
+restoreScrollPosition() {
+    if (this.catalogScrollPosition > 0) {
+        console.log('📌 Восстанавливаю после действия:', this.catalogScrollPosition);
+        
+        // Устанавливаем флаг восстановления
+        this._isRestoring = true;
+        
+        // Используем requestAnimationFrame для синхронизации с рендерингом
+        requestAnimationFrame(() => {
+            window.scrollTo({
+                top: Math.round(this.catalogScrollPosition),
+                behavior: 'instant'
+            });
+            
+            // Проверяем, что скролл действительно изменился
+            setTimeout(() => {
+                // Проверяем, не было ли новых скроллов во время восстановления
+                if (window.scrollY !== Math.round(this.catalogScrollPosition)) {
+                    window.scrollTo(0, Math.round(this.catalogScrollPosition));
+                }
+                
+                // Снимаем флаг через 100мс, но только если не было новых вызовов
+                setTimeout(() => {
+                    this._isRestoring = false;
+                    console.log('✅ Восстановление завершено');
+                }, 100);
+            }, 50);
+        });
+    }
+},
+_processQtyChange(item, delta) {
     const newQty = (item.qty || 1) + delta;
     
-    // Проверка на удаление (если 0 или меньше)
     if (newQty <= 0) {
         this.removeFromCart(item.cartId);
         return;
     }
     
-    // ОПТИМИЗАЦИЯ 2: Сначала обновляем UI (оптимистичное обновление)
     item.qty = newQty;
     
-    // ОПТИМИЗАЦИЯ 3: Отменяем предыдущий таймер, если есть
     if (item.qtyTimeout) {
         clearTimeout(item.qtyTimeout);
     }
     
-    // ОПТИМИЗАЦИЯ 4: Сохраняем с задержкой (debounce)
+    // Увеличиваем задержку для Telegram WebView
+    const delay = this.isTelegramWebView ? 800 : 500;
+    
     item.qtyTimeout = setTimeout(() => {
         this.validateAndSaveCart(item);
         delete item.qtyTimeout;
-    }, 500);
+    }, delay);
     
-    // ОПТИМИЗАЦИЯ 5: Вибрация только при клике
     this.vib('light');
 },
 
@@ -3859,17 +3984,45 @@ removeFromCart(cartId) {
     this.vib('medium');
 },
 
-        saveCart() {
+        // ЗАМЕНИТЕ существующий saveCart на этот:
+saveCart() {
+    // Используем requestAnimationFrame для отложенной записи
+    if (this.cartSaveTimeout) {
+        clearTimeout(this.cartSaveTimeout);
+    }
+    
+    this.cartSaveTimeout = setTimeout(() => {
+        try {
             localStorage.setItem('naran_cart_v3', JSON.stringify(this.cart));
-        },
+        } catch (e) {
+            console.error('Ошибка сохранения корзины:', e);
+        }
+    }, 100);
+},
 
-         setDelivery(d) {
+        setDelivery(d) {
     this.deliv = d;
     this.vib();
+    
     // Задержка перед инициализацией карты
     setTimeout(() => {
         if (this.deliv && document.getElementById('map')) {
-            this.initMap();
+            // Проверяем, загрузилась ли библиотека
+            if (typeof mapgl !== 'undefined') {
+                this.initMap();
+            } else {
+                console.log('⏳ Библиотека 2GIS еще загружается, ждем...');
+                // Даем время на загрузку и пробуем снова
+                setTimeout(() => {
+                    if (typeof mapgl !== 'undefined') {
+                        this.initMap();
+                    } else {
+                        console.warn('⚠️ 2GIS не загрузилась, показываем демо-режим');
+                        // Показываем демо-адрес
+                        this.address = this.deliv + ': Москва, Красная площадь, 1';
+                    }
+                }, 1000);
+            }
         }
     }, 100);
 },
@@ -3880,24 +4033,45 @@ initMap() {
     if (this.mapInitializing) return;
     this.mapInitializing = true;
     
+    // ⭐ ПРОВЕРЯЕМ, ЗАГРУЗИЛАСЬ ЛИ БИБЛИОТЕКА
+    if (typeof mapgl === 'undefined') {
+        console.warn('⏳ 2GIS карта еще не загрузилась, пробуем через 500мс');
+        
+        // Пробуем еще раз через 500мс
+        setTimeout(() => {
+            this.mapInitializing = false;
+            this.initMap();
+        }, 500);
+        return;
+    }
+    
     try {
         if (this.map) { 
             this.map.destroy(); 
             this.map = null; 
         }
         
-       const currentKey = this.mapKey;
-        const mapContainer = document.getElementById('map');
+        const currentKey = this.mapKey || window.MAP_KEY;
+        if (!currentKey) {
+            console.error('❌ Ключ 2GIS не найден');
+            this.mapInitializing = false;
+            return;
+        }
         
+        const mapContainer = document.getElementById('map');
         if (!mapContainer) {
             this.mapInitializing = false;
             return;
         }
         
+        // ⭐ СОЗДАЕМ КАРТУ С ДОПОЛНИТЕЛЬНЫМИ НАСТРОЙКАМИ
         this.map = new mapgl.Map('map', {
             center: [37.6175, 55.7558],
             zoom: 13,
-            key: currentKey
+            key: currentKey,
+            language: 'ru', // Добавляем язык
+            scaleControl: true, // Добавляем контроль масштаба
+            zoomControl: true
         });
 
         const setPos = (lat, lon) => {
@@ -3907,29 +4081,35 @@ initMap() {
             this.getAddress(lat, lon);
         };
 
-        // ТОЛЬКО ОДИН ИСТОЧНИК ГЕОЛОКАЦИИ
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
                 (p) => setPos(p.coords.latitude, p.coords.longitude),
-                (err) => console.log("Гео не поддерживается", err),
+                (err) => {
+                    console.log("Геолокация не поддерживается или отклонена", err);
+                    // Если геолокация не работает, показываем Москву по умолчанию
+                    this.getAddress(55.7558, 37.6175);
+                },
                 { timeout: 5000, maximumAge: 60000 }
             );
+        } else {
+            // Если геолокация вообще не поддерживается
+            this.getAddress(55.7558, 37.6175);
         }
 
-        // Убираем дублирование обработчика клика
         this.map.on('click', (e) => {
             if (e.lngLat) {
                 this.getAddress(e.lngLat[1], e.lngLat[0]);
             }
         });
         
+        console.log('✅ Карта 2GIS успешно инициализирована');
+        
     } catch (e) { 
-        console.error("Map error", e); 
+        console.error("❌ Ошибка инициализации карты:", e); 
     } finally {
         setTimeout(() => { this.mapInitializing = false; }, 1000);
     }
 },
-
       getAddress(lat, lon) {
    const currentKey = this.mapKey;
     // Добавили запрос всех полей, где может прятаться город
@@ -4414,6 +4594,49 @@ updateFavListWithTempSize() {
         }
     });
 },
+// Метод handleScrollSave должен быть таким:
+handleScrollSave() {
+    // Игнорируем если скролл заблокирован или идет восстановление
+    if (this._isRestoring || this._scrollBlocked || this.selP || this.tab !== 'catalog') {
+        return;
+    }
+    
+    if (this.scrollTimer) clearTimeout(this.scrollTimer);
+    
+    this.scrollTimer = setTimeout(() => {
+        const currentScroll = window.scrollY;
+        if (currentScroll > 0 && !this._isRestoring && !this._scrollBlocked) {
+            this.catalogScrollPosition = Math.round(currentScroll);
+            this._scrollPosition = this.catalogScrollPosition;
+            console.log('📌 Сохранена позиция:', this.catalogScrollPosition);
+        }
+    }, 300);
+},
+clearAllTimers() {
+    const timers = ['scrollTimer', 'cartSaveTimeout', 'scrollTimeout'];
+    timers.forEach(timerName => {
+        if (this[timerName]) {
+            clearTimeout(this[timerName]);
+            this[timerName] = null;
+        }
+    });
+},
+safeHaptic(type = 'light') {
+    try {
+        if (window.Telegram?.WebApp?.HapticFeedback) {
+            const version = window.Telegram.WebApp.version || '6.0';
+            if (parseFloat(version) >= 6.1) {
+                if (type === 'success') {
+                    window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+                } else {
+                    window.Telegram.WebApp.HapticFeedback.impactOccurred(type);
+                }
+            }
+        }
+    } catch (e) {
+        // Игнорируем
+    }
+},
 
 // Вспомогательный метод для Data URL
 fileToDataURL(file) {
@@ -4660,21 +4883,41 @@ async sendOrderToBot() {
     }
 },
 closeProductModal() {
-    // Разблокируем прокрутку
+    // Сохраняем позицию
+    const savedPosition = this._scrollPosition || this.catalogScrollPosition;
+    console.log('📌 Сохраненная позиция при закрытии:', savedPosition);
+    
+    // Сбрасываем все
+    this._scrollBlocked = false;
+    this.selP = null;
+    this.currentVariantIndex = 0;
+    this.openedProduct = null;
+    this.selVariantIdx = 0;
+    
+    // Разблокируем скролл
     document.body.style.overflow = '';
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.width = '';
+    document.body.style.height = '';
     
-    // Вибрация
-    if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
-    }
+    this._isRestoring = true;
     
-    // Очищаем с небольшой задержкой для избежания мерцания
+    // ⭐ ЕДИНСТВЕННОЕ МЕСТО ВОССТАНОВЛЕНИЯ
     setTimeout(() => {
-        this.selP = null;
-        this.currentVariantIndex = 0;
-        this.openedProduct = null;
-        this.selVariantIdx = 0;
-    }, 50);
+        if (this.tab === 'catalog' && savedPosition > 0) {
+            window.scrollTo({
+                top: savedPosition,
+                behavior: 'instant'
+            });
+            console.log('✅ Восстановлена позиция:', savedPosition);
+        }
+        
+        setTimeout(() => {
+            this._isRestoring = false;
+            this._scrollPosition = 0;
+        }, 300);
+    }, 150);
 },
 async updateStatus(order, newStatus) {
     if (order.status === newStatus) return;
@@ -5131,32 +5374,30 @@ updateChart() {
     console.log('window.BOT_TOKEN:', window.BOT_TOKEN ? '✅' : '❌');
     console.log('window.FIREBASE_CONFIG:', window.FIREBASE_CONFIG ? '✅' : '❌');
     
-    // === КОПИРУЕМ КЛЮЧИ ИЗ WINDOW В this ===
-    // === КОПИРУЕМ КЛЮЧИ ИЗ WINDOW В this ===
-if (!this.adminId && window.ADMIN_ID) {
-    console.log('🔄 Копируем adminId из window:', window.ADMIN_ID);
-    this.adminId = window.ADMIN_ID;  // Просто число, НЕ МАССИВ!
-}
+    if (!this.adminId && window.ADMIN_ID) {
+        console.log('🔄 Копируем adminId из window:', window.ADMIN_ID);
+        this.adminId = window.ADMIN_ID;
+    }
 
-if (!this.mapKey && window.MAP_KEY) {
-    console.log('🔄 Копируем mapKey из window');
-    this.mapKey = window.MAP_KEY;
-}
+    if (!this.mapKey && window.MAP_KEY) {
+        console.log('🔄 Копируем mapKey из window');
+        this.mapKey = window.MAP_KEY;
+    }
 
-if (!this.imgbbKey && window.IMGBB_API_KEY) {
-    console.log('🔄 Копируем imgbbKey из window');
-    this.imgbbKey = window.IMGBB_API_KEY;
-}
+    if (!this.imgbbKey && window.IMGBB_API_KEY) {
+        console.log('🔄 Копируем imgbbKey из window');
+        this.imgbbKey = window.IMGBB_API_KEY;
+    }
 
-if (!this.botToken && window.BOT_TOKEN) {
-    console.log('🔄 Копируем botToken из window');
-    this.botToken = window.BOT_TOKEN;
-}
+    if (!this.botToken && window.BOT_TOKEN) {
+        console.log('🔄 Копируем botToken из window');
+        this.botToken = window.BOT_TOKEN;
+    }
 
-if (!this.firebaseConfig && window.FIREBASE_CONFIG) {
-    console.log('🔄 Копируем firebaseConfig из window');
-    this.firebaseConfig = window.FIREBASE_CONFIG;
-}
+    if (!this.firebaseConfig && window.FIREBASE_CONFIG) {
+        console.log('🔄 Копируем firebaseConfig из window');
+        this.firebaseConfig = window.FIREBASE_CONFIG;
+    }
     
     console.log('=== ПОСЛЕ КОПИРОВАНИЯ ===');
     console.log('this.adminId:', this.adminId);
@@ -5174,35 +5415,30 @@ if (!this.firebaseConfig && window.FIREBASE_CONFIG) {
         }
     }
     
-   // 2. Данные пользователя с fallback
-// Получаем данные пользователя из Telegram
-this.user = window.Telegram?.WebApp?.initDataUnsafe?.user;
+    // 2. Данные пользователя с fallback
+    this.user = window.Telegram?.WebApp?.initDataUnsafe?.user;
 
-if (!this.user) {
-    console.log('⚠️ Приложение открыто вне Telegram');
-    this.user = { 
-        id: null, 
-        first_name: 'Гость',
-        is_guest: true 
-    };
-    this.isAdmin = false;
-} else {
-    // Проверка админа только для реальных пользователей Telegram
-    this.isAdmin = (Number(this.user.id) === Number(this.adminId));
-}
+    if (!this.user) {
+        console.log('⚠️ Приложение открыто вне Telegram');
+        this.user = { 
+            id: null, 
+            first_name: 'Гость',
+            is_guest: true 
+        };
+        this.isAdmin = false;
+    } else {
+        this.isAdmin = (Number(this.user.id) === Number(this.adminId));
+    }
 
-console.log('User:', this.user);
-console.log('Is admin:', this.isAdmin);
-console.log('Admin ID:', this.adminId);
-console.log('User ID:', this.user.id);
+    console.log('User:', this.user);
+    console.log('Is admin:', this.isAdmin);
+    console.log('Admin ID:', this.adminId);
+    console.log('User ID:', this.user.id);
 
-// УДАЛИТЕ ВЕСЬ СТАРЫЙ БЛОК С 3. Проверка админа
-// (все что после этого до комментария "4. Восстановление из localStorage")
     const savedAddr = localStorage.getItem('naran_last_addr');
     if (savedAddr) this.address = savedAddr;
     
     this.$watch(() => this.products, () => {
-        // При изменении списка товаров очищаем кэш выбора цветов
         this.catalogActiveColors = {};
     }, { deep: true });
     
@@ -5210,117 +5446,115 @@ console.log('User ID:', this.user.id);
     let firebaseInitAttempts = 0;
     const MAX_ATTEMPTS = 10;
 
-  const initFirebaseData = () => {
-    if (firebaseInitAttempts >= MAX_ATTEMPTS) {
-        console.error("❌ Failed to initialize Firebase after", MAX_ATTEMPTS, "attempts");
-        return;
-    }
-    
-    firebaseInitAttempts++;
-    
-    // Проверяем наличие Firebase объектов
-    if (!window.fb || !window.db) {
-        console.log("⏳ Firebase еще не инициализирован, попытка", firebaseInitAttempts);
-        setTimeout(initFirebaseData, 500);
-        return;
-    }
-    
-    if (window.fb && window.fb.onSnapshot) {
-        console.log("✅ Firebase initialized, attempt", firebaseInitAttempts);
-        
-        // Сохраняем функции отписки для очистки
-        this.unsubscribers = [];
-        
-        // 5.1. Товары
-        try {
-            const unsubProducts = window.fb.onSnapshot(
-                window.fb.query(
-                    window.fb.collection(window.db, "products"), 
-                    window.fb.orderBy("createdAt", "desc")
-                ), 
-                snap => {
-                    this.products = snap.docs.map(doc => ({ 
-                        id: doc.id, 
-                        ...doc.data(), 
-                        aIdx: 0 
-                    }));
-                    console.log('✅ Products loaded:', this.products.length);
-                    
-                    this.$nextTick(() => {
-                        if (this.tab === 'profile') {
-                            this.calculateListHeight();
-                        }
-                    });
-                },
-                err => console.error("❌ Products error:", err)
-            );
-            this.unsubscribers.push(unsubProducts);
-        } catch (e) {
-            console.error("Error setting up products listener:", e);
+    const initFirebaseData = () => {
+        if (firebaseInitAttempts >= MAX_ATTEMPTS) {
+            console.error("❌ Failed to initialize Firebase after", MAX_ATTEMPTS, "attempts");
+            return;
         }
         
-        // 5.2. Категории
-        try {
-            const unsubCategories = window.fb.onSnapshot(
-                window.fb.collection(window.db, "categories"), 
-                snap => {
-                    this.categories = snap.docs.map(doc => ({ 
-                        id: doc.id, 
-                        ...doc.data() 
-                    }));
-                    console.log('✅ Categories loaded:', this.categories.length);
-                },
-                err => console.error("❌ Categories error:", err)
-            );
-            this.unsubscribers.push(unsubCategories);
-        } catch (e) {
-            console.error("Error setting up categories listener:", e);
+        firebaseInitAttempts++;
+        
+        if (!window.fb || !window.db) {
+            console.log("⏳ Firebase еще не инициализирован, попытка", firebaseInitAttempts);
+            setTimeout(initFirebaseData, 500);
+            return;
         }
         
-        // 5.3. ЗАКАЗЫ
-        try {
-            const unsubOrders = window.fb.onSnapshot(
-                window.fb.query(
-                    window.fb.collection(window.db, "orders"),
-                    window.fb.orderBy("createdAt", "desc")
-                ),
-                snap => {
-                    this.allOrders = snap.docs.map(doc => {
-                        const data = doc.data();
-                        return {
-                            id: doc.id,
-                            ...data,
-                            displayDate: data.createdAt?.toDate 
-                                ? data.createdAt.toDate().toLocaleDateString('ru-RU')
-                                : new Date().toLocaleDateString('ru-RU')
-                        };
-                    });
-                    console.log('✅ Orders loaded:', this.allOrders.length);
-                    
-                    if (this.tab === 'profile' && this.isAdmin) {
+        if (window.fb && window.fb.onSnapshot) {
+            console.log("✅ Firebase initialized, attempt", firebaseInitAttempts);
+            
+            this.unsubscribers = [];
+            
+            // 5.1. Товары
+            try {
+                const unsubProducts = window.fb.onSnapshot(
+                    window.fb.query(
+                        window.fb.collection(window.db, "products"), 
+                        window.fb.orderBy("createdAt", "desc")
+                    ), 
+                    snap => {
+                        this.products = snap.docs.map(doc => ({ 
+                            id: doc.id, 
+                            ...doc.data(), 
+                            aIdx: 0 
+                        }));
+                        console.log('✅ Products loaded:', this.products.length);
+                        
                         this.$nextTick(() => {
-                            setTimeout(() => {
-                                console.log('Auto-updating chart after orders load...');
-                                this.updateChart();
-                            }, 800);
+                            if (this.tab === 'profile') {
+                                this.calculateListHeight();
+                            }
                         });
+                    },
+                    err => console.error("❌ Products error:", err)
+                );
+                this.unsubscribers.push(unsubProducts);
+            } catch (e) {
+                console.error("Error setting up products listener:", e);
+            }
+            
+            // 5.2. Категории
+            try {
+                const unsubCategories = window.fb.onSnapshot(
+                    window.fb.collection(window.db, "categories"), 
+                    snap => {
+                        this.categories = snap.docs.map(doc => ({ 
+                            id: doc.id, 
+                            ...doc.data() 
+                        }));
+                        console.log('✅ Categories loaded:', this.categories.length);
+                    },
+                    err => console.error("❌ Categories error:", err)
+                );
+                this.unsubscribers.push(unsubCategories);
+            } catch (e) {
+                console.error("Error setting up categories listener:", e);
+            }
+            
+            // 5.3. ЗАКАЗЫ
+            try {
+                const unsubOrders = window.fb.onSnapshot(
+                    window.fb.query(
+                        window.fb.collection(window.db, "orders"),
+                        window.fb.orderBy("createdAt", "desc")
+                    ),
+                    snap => {
+                        this.allOrders = snap.docs.map(doc => {
+                            const data = doc.data();
+                            return {
+                                id: doc.id,
+                                ...data,
+                                displayDate: data.createdAt?.toDate 
+                                    ? data.createdAt.toDate().toLocaleDateString('ru-RU')
+                                    : new Date().toLocaleDateString('ru-RU')
+                            };
+                        });
+                        console.log('✅ Orders loaded:', this.allOrders.length);
+                        
+                        if (this.tab === 'profile' && this.isAdmin) {
+                            this.$nextTick(() => {
+                                setTimeout(() => {
+                                    console.log('Auto-updating chart after orders load...');
+                                    this.updateChart();
+                                }, 800);
+                            });
+                        }
+                    },
+                    err => {
+                        console.error("❌ Orders error:", err);
+                        this.allOrders = [];
                     }
-                },
-                err => {
-                    console.error("❌ Orders error:", err);
-                    this.allOrders = [];
-                }
-            );
-            this.unsubscribers.push(unsubOrders);
-        } catch (e) {
-            console.error("Error setting up orders listener:", e);
+                );
+                this.unsubscribers.push(unsubOrders);
+            } catch (e) {
+                console.error("Error setting up orders listener:", e);
+            }
+            
+        } else {
+            console.log("⏳ Waiting for Firebase... attempt", firebaseInitAttempts);
+            setTimeout(initFirebaseData, 500);
         }
-        
-    } else {
-        console.log("⏳ Waiting for Firebase... attempt", firebaseInitAttempts);
-        setTimeout(initFirebaseData, 500);
-    }
-};
+    };
 
     // Запускаем инициализацию Firebase
     console.log('🚀 Запуск инициализации Firebase...');
@@ -5329,7 +5563,6 @@ console.log('User ID:', this.user.id);
     // 6. Обработчики событий
     this.resizeHandler = () => {
         this.calculateListHeight();
-        // При ресайзе обновляем график если он есть
         if (this.tab === 'profile' && this.isAdmin && this.chart) {
             setTimeout(() => {
                 if (this.chart) {
@@ -5340,37 +5573,132 @@ console.log('User ID:', this.user.id);
     };
     window.addEventListener('resize', this.resizeHandler);
     
+    // ⭐ ИСПРАВЛЕНО: Сохраняем ссылку на обработчик скролла
+    this.scrollHandler = this.handleScrollSave.bind(this);
+    window.addEventListener('scroll', this.scrollHandler, { passive: true });
+    
+    // ⭐ ИСПРАВЛЕНО: Инициализируем переменные для скролла
+    this.scrollTimer = null;
+    this._restoreAttempts = 0;
+    
+    // ⭐ ИСПРАВЛЕНО: Восстанавливаем позицию при возврате на вкладку каталог
+    this.$watch('tab', (newVal, oldVal) => {
+        if (newVal === 'catalog') {
+            // Небольшая задержка для стабилизации DOM
+            setTimeout(() => {
+                if (this.catalogScrollPosition > 0 && !this._isRestoring) {
+                    console.log('📌 Вкладка каталог активирована, восстановление позиции:', this.catalogScrollPosition);
+                    this._isRestoring = true;
+                    
+                    window.scrollTo({
+                        top: this.catalogScrollPosition,
+                        behavior: 'instant'
+                    });
+                    
+                    setTimeout(() => {
+                        this._isRestoring = false;
+                    }, 300);
+                }
+            }, 100);
+        }
+    });
+    
+    // ⭐ ИСПРАВЛЕНО: Восстанавливаем позицию после загрузки товаров
+    this.$watch('products', (newProducts) => {
+        if (newProducts.length > 0 && this.tab === 'catalog' && this.catalogScrollPosition > 0 && !this._isRestoring) {
+            this.$nextTick(() => {
+                setTimeout(() => {
+                    console.log('📌 Восстановление после загрузки товаров:', this.catalogScrollPosition);
+                    this._isRestoring = true;
+                    window.scrollTo(0, this.catalogScrollPosition);
+                    
+                    setTimeout(() => {
+                        this._isRestoring = false;
+                    }, 300);
+                }, 100);
+            });
+        }
+    }, { deep: true });
+    
     console.log('=== MOUNTED ЗАВЕРШЕН ===');
 },
 
 beforeDestroy() {
+    console.log('=== BEFORE DESTROY ===');
+    
     // 1. Отписываемся от Firebase слушателей
-    if (this.unsubscribers) {
+    if (this.unsubscribers && Array.isArray(this.unsubscribers)) {
         this.unsubscribers.forEach(unsub => {
             try {
-                if (typeof unsub === 'function') unsub();
+                if (typeof unsub === 'function') {
+                    unsub();
+                }
             } catch (e) {
                 console.error("Error unsubscribing:", e);
             }
         });
+        this.unsubscribers = [];
     }
     
     // 2. Уничтожаем график
     if (this.chart && typeof this.chart.destroy === 'function') {
-        this.chart.destroy();
-    }
-    
-    // 3. Удаляем обработчики событий
-    if (this.resizeHandler) {
-        window.removeEventListener('resize', this.resizeHandler);
-    }
-    
-    // Удаляем обработчик ресайза для графика
-    window.removeEventListener('resize', () => {
-        if (this.chart) {
-            this.chart.resize();
+        try {
+            this.chart.destroy();
+            this.chart = null;
+        } catch (e) {
+            console.error("Error destroying chart:", e);
         }
-    });
+    }
+    
+    // 3. Очищаем все таймеры
+    if (this.scrollTimer) {
+        clearTimeout(this.scrollTimer);
+        this.scrollTimer = null;
+    }
+    
+    if (this.cartSaveTimeout) {
+        clearTimeout(this.cartSaveTimeout);
+        this.cartSaveTimeout = null;
+    }
+    
+    if (this.scrollTimeout) {
+        clearTimeout(this.scrollTimeout);
+        this.scrollTimeout = null;
+    }
+    
+    // 4. Удаляем обработчики событий
+    if (this.resizeHandler) {
+        try {
+            window.removeEventListener('resize', this.resizeHandler);
+            this.resizeHandler = null;
+        } catch (e) {
+            console.error("Error removing resize handler:", e);
+        }
+    }
+    
+    // ⭐ ИСПРАВЛЕНО: Удаляем обработчик скролла по ссылке
+    if (this.scrollHandler) {
+        try {
+            window.removeEventListener('scroll', this.scrollHandler);
+            this.scrollHandler = null;
+        } catch (e) {
+            console.error("Error removing scroll handler:", e);
+        }
+    }
+    
+    // 5. Очищаем все превью URL
+    try {
+        this.cleanupAllPreviews();
+    } catch (e) {
+        console.error("Error cleaning previews:", e);
+    }
+    
+    // 6. Сбрасываем флаги
+    this._isRestoring = false;
+    this.isCheckingOut = false;
+    this.loading = false;
+    
+    console.log('=== BEFORE DESTROY ЗАВЕРШЕН ===');
 }
 
 }).mount('#app');
