@@ -2410,14 +2410,34 @@ handleTelegramAuth(tgData) {
     if (container) container.innerHTML = '';
 },
 initTelegramLogin() {
+    console.log('🔍 initTelegramLogin вызван!');
+    console.log('this.user:', this.user);
+    console.log('this.user.is_guest:', this.user?.is_guest);
+    console.log('this.botUsername:', this.botUsername);
+    console.log('window.Telegram?.WebApp:', window.Telegram?.WebApp);
+    
     // Не загружаем, если пользователь уже авторизован
-    if (this.user && !this.user.is_guest) return;
+    if (this.user && !this.user.is_guest) {
+        console.log('⏭️ Пользователь авторизован, виджет не нужен');
+        return;
+    }
     // Не загружаем внутри Telegram WebApp (там данные уже есть)
-    if (window.Telegram?.WebApp) return;
-    if (!this.botUsername) return;
+    if (window.Telegram?.WebApp) {
+        console.log('⏭️ Внутри Telegram WebApp, виджет не нужен');
+        return;
+    }
+    if (!this.botUsername) {
+        console.error('❌ botUsername не определен!');
+        return;
+    }
 
     const container = document.getElementById('telegram-login-container');
-    if (!container) return;
+    console.log('📦 Контейнер для виджета:', container);
+    
+    if (!container) {
+        console.error('❌ Контейнер #telegram-login-container не найден в DOM!');
+        return;
+    }
 
     // Очищаем контейнер на случай повторного вызова
     container.innerHTML = '';
@@ -2433,10 +2453,12 @@ initTelegramLogin() {
 
     // Глобальный колбэк
     window.onTelegramAuth = (user) => {
+        console.log('✅ Telegram auth success:', user);
         this.handleTelegramAuth(user);
     };
 
     container.appendChild(script);
+    console.log('✅ Скрипт виджета добавлен в контейнер');
 },
 removeEditImage(imgIdx) {
     if (confirm("Удалить это фото из товара?")) {
@@ -5530,15 +5552,13 @@ updateChart() {
     }
 }
     },
- mounted() {
+mounted() {
     console.log('=== VUE APP MOUNTED ===');
     
     // Очистка превью при закрытии
     window.addEventListener('beforeunload', () => {
         this.cleanupAllPreviews();
     });
-    
-    const tg = window.Telegram.WebApp || {};
     
     // === ПРОВЕРКА ВСЕХ КЛЮЧЕЙ ===
     console.log('=== ПРОВЕРКА КОНФИГУРАЦИИ ===');
@@ -5547,12 +5567,14 @@ updateChart() {
     console.log('this.imgbbKey:', this.imgbbKey ? '✅ установлен' : '❌ отсутствует');
     console.log('this.botToken:', this.botToken ? '✅ установлен' : '❌ отсутствует');
     console.log('this.firebaseConfig:', this.firebaseConfig ? '✅ установлен' : '❌ отсутствует');
+    console.log('this.botUsername:', this.botUsername); // <-- ДОБАВЬТЕ ЭТУ СТРОКУ
     
     console.log('window.ADMIN_ID:', window.ADMIN_ID);
     console.log('window.MAP_KEY:', window.MAP_KEY ? '✅' : '❌');
     console.log('window.IMGBB_API_KEY:', window.IMGBB_API_KEY ? '✅' : '❌');
     console.log('window.BOT_TOKEN:', window.BOT_TOKEN ? '✅' : '❌');
     console.log('window.FIREBASE_CONFIG:', window.FIREBASE_CONFIG ? '✅' : '❌');
+    console.log('window.BOT_USERNAME:', window.BOT_USERNAME); // <-- ДОБАВЬТЕ ЭТУ СТРОКУ
     
     if (!this.adminId && window.ADMIN_ID) {
         console.log('🔄 Копируем adminId из window:', window.ADMIN_ID);
@@ -5574,6 +5596,11 @@ updateChart() {
         this.botToken = window.BOT_TOKEN;
     }
 
+    if (!this.botUsername && window.BOT_USERNAME) { // <-- ИСПРАВЛЕНО
+        console.log('🔄 Копируем botUsername из window:', window.BOT_USERNAME);
+        this.botUsername = window.BOT_USERNAME;
+    }
+
     if (!this.firebaseConfig && window.FIREBASE_CONFIG) {
         console.log('🔄 Копируем firebaseConfig из window');
         this.firebaseConfig = window.FIREBASE_CONFIG;
@@ -5582,6 +5609,7 @@ updateChart() {
     console.log('=== ПОСЛЕ КОПИРОВАНИЯ ===');
     console.log('this.adminId:', this.adminId);
     console.log('this.imgbbKey:', this.imgbbKey ? '✅' : '❌');
+    console.log('this.botUsername:', this.botUsername); // <-- ДОБАВЬТЕ ЭТУ СТРОКУ
     console.log('this.firebaseConfig:', this.firebaseConfig ? '✅' : '❌');
     
     // 1. Безопасная инициализация Telegram
@@ -5643,9 +5671,17 @@ updateChart() {
     }
     
     // 5. Инициализируем виджет Telegram Login (только для гостей вне Telegram)
-    this.$nextTick(() => {
-        this.initTelegramLogin();
-    });
+    if (this.user && this.user.is_guest) {
+        console.log('👤 Пользователь гость, инициализируем виджет...');
+        console.log('botUsername:', this.botUsername);
+        console.log('window.Telegram?.WebApp:', window.Telegram?.WebApp);
+        
+        this.$nextTick(() => {
+            this.initTelegramLogin();
+        });
+    } else {
+        console.log('👤 Пользователь уже авторизован, виджет не нужен');
+    }
     
     console.log('User:', this.user);
     console.log('Is admin:', this.isAdmin);
@@ -5839,7 +5875,7 @@ updateChart() {
     }, { deep: true });
     
     console.log('=== MOUNTED ЗАВЕРШЕН ===');
-},
+}, 
 
 beforeDestroy() {
     console.log('=== BEFORE DESTROY ===');
