@@ -1867,7 +1867,13 @@ body.modal-open {
     import { setDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 
-const CONFIG_URL = '/config.json';
+const basePath = window.location.pathname.includes('/') 
+    ? window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1)
+    : '/';
+const CONFIG_URL = basePath + 'config.json';
+
+console.log('Базовый путь:', basePath);
+console.log('Полный URL конфига:', CONFIG_URL);
 let ADMIN_ID = null;
 let MAP_KEY = null;
 let IMGBB_API_KEY = null;
