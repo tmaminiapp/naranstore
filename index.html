@@ -1131,15 +1131,29 @@ body.modal-open {
     </div>
 </div>  <div v-if="tab === 'profile'">
     <div style="text-align:center; margin-bottom: 30px;">
-        <img :src="user.photo_url || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'" style="width:80px; height:80px; border-radius:50%; border: 1px solid #000; padding: 3px;">
-         <div style="font-weight:800; margin-top:10px; text-transform:uppercase;">
+        <img :src="user.photo_url || 'https://cdn-icons-png.flaticon.com/512/149/149071.png'" 
+             style="width:80px; height:80px; border-radius:50%; border: 1px solid #000; padding: 3px;">
+        <div style="font-weight:800; margin-top:10px; text-transform:uppercase;">
             {{ isAdmin ? 'АДМИНИСТРАТОР' : (user.first_name || 'Клиент') }}
         </div>
 
-        <div v-if="user.is_guest" id="telegram-login-container" style="margin: 15px 0;"></div>
+        <!-- ВИДЖЕТ ВХОДА - теперь с правильным отображением -->
+        <div v-if="user.is_guest" style="margin: 15px 0;">
+            <!-- Кнопка входа через Telegram -->
+            <div id="telegram-login-container" style="
+                display: flex;
+                justify-content: center;
+                min-height: 60px;
+            "></div>
+            
+            <!-- Инструкция для пользователей с блокировщиками рекламы -->
+            <div style="font-size: 12px; color: #666; margin-top: 10px;">
+                Нажмите кнопку "Login with Telegram" для входа
+            </div>
+        </div>
 
-         <button v-if="!isAdmin && !user.is_guest" @click="logout" class="cat-tab" style="margin-top:5px;">ВЫЙТИ</button>
-         <button 
+        <button v-if="!isAdmin && !user.is_guest" @click="logout" class="cat-tab" style="margin-top:5px;">ВЫЙТИ</button>
+        <button 
             v-if="!isAdmin"
             @click="openSupport" 
             class="cat-tab" 
@@ -2315,6 +2329,15 @@ selVariant() {
             },
     },
   watch: {
+     tab(newVal) {
+        console.log('Вкладка изменена на:', newVal);
+        if (newVal === 'profile' && this.user?.is_guest) {
+            // Перезагружаем виджет при переходе на вкладку профиля
+            setTimeout(() => {
+                this.loadTelegramWidget();
+            }, 100);
+        }
+    },
     products: {
         handler(newProducts) {
             // При изменении товаров корректируем активные цвета для скрытых вариантов
@@ -2339,6 +2362,36 @@ selVariant() {
      vib() {
     this.safeHaptic('light');
 },
+lloadTelegramWidget() {
+        console.log('🔄 Загрузка виджета Telegram в профиле...');
+        
+        // Проверяем, есть ли контейнер
+        const container = document.getElementById('telegram-login-container');
+        if (!container) {
+            console.log('❌ Контейнер не найден');
+            return;
+        }
+        
+        // Очищаем контейнер
+        container.innerHTML = '';
+        
+        // Создаем скрипт виджета
+        const script = document.createElement('script');
+        script.async = true;
+        script.src = 'https://telegram.org/js/telegram-widget.js?22';
+        script.setAttribute('data-telegram-login', this.botUsername || 'naranstore_bot');
+        script.setAttribute('data-size', 'large');
+        script.setAttribute('data-radius', '10');
+        script.setAttribute('data-onauth', 'onTelegramLogin(user)');
+        script.setAttribute('data-request-access', 'write');
+        
+        // Обработчики
+        script.onload = () => console.log('✅ Виджет Telegram загружен');
+        script.onerror = (e) => console.error('❌ Ошибка загрузки виджета:', e);
+        
+        container.appendChild(script);
+    },
+    
 total() {
     if (!this.cart || !Array.isArray(this.cart) || this.cart.length === 0) {
         return 0;
@@ -2377,6 +2430,22 @@ async saveUserToFirestore(userData) {
         console.error('❌ Ошибка сохранения пользователя:', e);
     }
 },
+initTelegramLogin() {
+        console.log('🔍 initTelegramLogin вызван');
+        console.log('user.is_guest:', this.user?.is_guest);
+        console.log('botUsername:', this.botUsername);
+        
+        if (this.user && this.user.is_guest) {
+            console.log('✅ Гость - загружаем виджет');
+            
+            // Даем время для рендера DOM
+            setTimeout(() => {
+                this.loadTelegramWidget();
+            }, 300);
+        } else {
+            console.log('❌ Пользователь не гость, виджет не нужен');
+        }
+    },
 logout() {
     this.user = { is_guest: true };
     this.isAdmin = false;
@@ -2387,28 +2456,30 @@ logout() {
     // Переинициализируем виджет (он снова появится)
     this.initTelegramLogin();
 },
-handleTelegramAuth(tgData) {
-    // tgData приходит из виджета: { id, first_name, username, photo_url, auth_date, hash }
-    const user = {
-        id: tgData.id,
-        first_name: tgData.first_name || '',
-        username: tgData.username || '',
-        photo_url: tgData.photo_url || '',
-        is_guest: false
-    };
-    this.user = user;
-    this.isAdmin = (Number(user.id) === Number(this.adminId));
-    
-    // Сохраняем в localStorage для следующих сессий
-    localStorage.setItem('naran_user', JSON.stringify(user));
-    
-    // Сохраняем в Firestore
-    this.saveUserToFirestore(user);
-    
-    // Скрываем виджет (можно просто удалить контейнер)
-    const container = document.getElementById('telegram-login-container');
-    if (container) container.innerHTML = '';
-},
+handleTelegramAuth(user) {
+        console.log('✅ Успешный вход через Telegram:', user);
+        
+        // Обновляем данные пользователя
+        this.user = {
+            id: user.id,
+            first_name: user.first_name,
+            last_name: user.last_name || '',
+            username: user.username || '',
+            photo_url: user.photo_url || '',
+            is_guest: false
+        };
+        
+        // Проверка на админа
+        if (user.id == this.adminId) {
+            this.isAdmin = true;
+        }
+        
+        // Сохраняем в localStorage
+        localStorage.setItem('user', JSON.stringify(this.user));
+        
+        // Обновляем интерфейс
+        this.$forceUpdate();
+    },
 initTelegramLogin() {
     console.log('🔍 initTelegramLogin вызван!');
     console.log('this.user:', this.user);
@@ -2416,20 +2487,18 @@ initTelegramLogin() {
     console.log('this.botUsername:', this.botUsername);
     console.log('window.Telegram?.WebApp:', window.Telegram?.WebApp);
     
-    // Не загружаем, если пользователь уже авторизован
-    if (this.user && !this.user.is_guest) {
-        console.log('⏭️ Пользователь авторизован, виджет не нужен');
-        return;
-    }
-    // Не загружаем внутри Telegram WebApp (там данные уже есть)
-    if (window.Telegram?.WebApp) {
-        console.log('⏭️ Внутри Telegram WebApp, виджет не нужен');
-        return;
-    }
-    if (!this.botUsername) {
-        console.error('❌ botUsername не определен!');
-        return;
-    }
+   if (this.user && this.user.is_guest) {
+    console.log('✅ Пользователь гость, показываем виджет');
+    this.showTelegramLogin = true;
+    
+    // Принудительно загружаем виджет через setTimeout
+    setTimeout(() => {
+      this.loadTelegramWidget();
+    }, 500);
+  } else {
+    console.log('❌ Пользователь не гость, виджет не нужен');
+    this.showTelegramLogin = false;
+  }
 
     const container = document.getElementById('telegram-login-container');
     console.log('📦 Контейнер для виджета:', container);
@@ -5554,6 +5623,7 @@ updateChart() {
     },
 mounted() {
     console.log('=== VUE APP MOUNTED ===');
+    window.app = this;
     
     // Очистка превью при закрытии
     window.addEventListener('beforeunload', () => {
@@ -5985,6 +6055,29 @@ console.log('✅ Vue приложение запущено');
     }
 })();
 </script>
+<script>
+// Глобальная функция для callback от Telegram
+window.onTelegramLogin = function(user) {
+    console.log('🎯 Telegram callback получен:', user);
+    
+    // Пытаемся найти Vue приложение
+    if (window.app) {
+        window.app.handleTelegramAuth(user);
+    } else {
+        // Если Vue еще не готов, сохраняем в localStorage
+        console.log('⏳ Vue не готов, сохраняем данные');
+        localStorage.setItem('telegram_pending_user', JSON.stringify(user));
+    }
+}
 
+// Проверяем сохраненные данные при загрузке
+document.addEventListener('DOMContentLoaded', function() {
+    const pendingUser = localStorage.getItem('telegram_pending_user');
+    if (pendingUser) {
+        console.log('📦 Найден ожидающий пользователь');
+        // Оставляем для Vue приложения
+    }
+});
+</script>
 </body>
 </html>
