@@ -5584,6 +5584,7 @@ updateChart() {
     console.log('this.imgbbKey:', this.imgbbKey ? '✅' : '❌');
     console.log('this.firebaseConfig:', this.firebaseConfig ? '✅' : '❌');
     
+    // 1. Безопасная инициализация Telegram
     if (window.Telegram?.WebApp) {
         try {
             window.Telegram.WebApp.ready();
@@ -5594,7 +5595,7 @@ updateChart() {
         }
     }
     
-    // 2. ЗАГРУЗКА ПОЛЬЗОВАТЕЛЯ (исправлено!)
+    // 2. ЗАГРУЗКА ПОЛЬЗОВАТЕЛЯ (ТОЛЬКО ОДИН РАЗ!)
     // Сначала проверяем, есть ли пользователь в Telegram WebApp
     if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
         // Если открыто в Telegram
@@ -5617,7 +5618,11 @@ updateChart() {
                 console.log('✅ Пользователь загружен из localStorage:', this.user);
             } catch (e) {
                 console.error('Ошибка парсинга savedUser:', e);
-                this.user = { is_guest: true };
+                this.user = { 
+                    id: null, 
+                    first_name: 'Гость',
+                    is_guest: true 
+                };
             }
         } else {
             // Если ничего нет - создаем гостя
@@ -5628,49 +5633,26 @@ updateChart() {
             };
         }
     }
- 
-
-this.isAdmin = (this.user && !this.user.is_guest && Number(this.user.id) === Number(this.adminId));
-
+    
+    // 3. Проверяем, админ ли пользователь
+    this.isAdmin = (this.user && !this.user.is_guest && Number(this.user.id) === Number(this.adminId));
+    
     // 4. Сохраняем пользователя в Firestore (если это не гость)
     if (this.user && !this.user.is_guest) {
         this.saveUserToFirestore(this.user);
     }
-
+    
     // 5. Инициализируем виджет Telegram Login (только для гостей вне Telegram)
     this.$nextTick(() => {
         this.initTelegramLogin();
     });
-// 4. Сохраняем пользователя в Firestore (если это не гость)
-if (this.user && !this.user.is_guest) {
-    this.saveUserToFirestore(this.user);
-}
-
-// 5. Инициализируем виджет Telegram Login (только для гостей вне Telegram)
-this.$nextTick(() => {
-    this.initTelegramLogin();
-});
     
-    // 2. Данные пользователя с fallback
-    this.user = window.Telegram?.WebApp?.initDataUnsafe?.user;
-
-    if (!this.user) {
-        console.log('⚠️ Приложение открыто вне Telegram');
-        this.user = { 
-            id: null, 
-            first_name: 'Гость',
-            is_guest: true 
-        };
-        this.isAdmin = false;
-    } else {
-        this.isAdmin = (Number(this.user.id) === Number(this.adminId));
-    }
-
     console.log('User:', this.user);
     console.log('Is admin:', this.isAdmin);
     console.log('Admin ID:', this.adminId);
     console.log('User ID:', this.user.id);
-
+    
+    // Восстанавливаем сохраненный адрес
     const savedAddr = localStorage.getItem('naran_last_addr');
     if (savedAddr) this.address = savedAddr;
     
@@ -5678,7 +5660,7 @@ this.$nextTick(() => {
         this.catalogActiveColors = {};
     }, { deep: true });
     
-    // 5. Инициализация Firebase с защитой от повторных вызовов
+    // 6. Инициализация Firebase с защитой от повторных вызовов
     let firebaseInitAttempts = 0;
     const MAX_ATTEMPTS = 10;
 
@@ -5701,7 +5683,7 @@ this.$nextTick(() => {
             
             this.unsubscribers = [];
             
-            // 5.1. Товары
+            // 6.1. Товары
             try {
                 const unsubProducts = window.fb.onSnapshot(
                     window.fb.query(
@@ -5729,7 +5711,7 @@ this.$nextTick(() => {
                 console.error("Error setting up products listener:", e);
             }
             
-            // 5.2. Категории
+            // 6.2. Категории
             try {
                 const unsubCategories = window.fb.onSnapshot(
                     window.fb.collection(window.db, "categories"), 
@@ -5747,7 +5729,7 @@ this.$nextTick(() => {
                 console.error("Error setting up categories listener:", e);
             }
             
-            // 5.3. ЗАКАЗЫ
+            // 6.3. ЗАКАЗЫ
             try {
                 const unsubOrders = window.fb.onSnapshot(
                     window.fb.query(
@@ -5796,7 +5778,7 @@ this.$nextTick(() => {
     console.log('🚀 Запуск инициализации Firebase...');
     initFirebaseData();
     
-    // 6. Обработчики событий
+    // 7. Обработчики событий
     this.resizeHandler = () => {
         this.calculateListHeight();
         if (this.tab === 'profile' && this.isAdmin && this.chart) {
@@ -5809,15 +5791,15 @@ this.$nextTick(() => {
     };
     window.addEventListener('resize', this.resizeHandler);
     
-    // ⭐ ИСПРАВЛЕНО: Сохраняем ссылку на обработчик скролла
+    // Сохраняем ссылку на обработчик скролла
     this.scrollHandler = this.handleScrollSave.bind(this);
     window.addEventListener('scroll', this.scrollHandler, { passive: true });
     
-    // ⭐ ИСПРАВЛЕНО: Инициализируем переменные для скролла
+    // Инициализируем переменные для скролла
     this.scrollTimer = null;
     this._restoreAttempts = 0;
     
-    // ⭐ ИСПРАВЛЕНО: Восстанавливаем позицию при возврате на вкладку каталог
+    // Восстанавливаем позицию при возврате на вкладку каталог
     this.$watch('tab', (newVal, oldVal) => {
         if (newVal === 'catalog') {
             // Небольшая задержка для стабилизации DOM
@@ -5839,7 +5821,7 @@ this.$nextTick(() => {
         }
     });
     
-    // ⭐ ИСПРАВЛЕНО: Восстанавливаем позицию после загрузки товаров
+    // Восстанавливаем позицию после загрузки товаров
     this.$watch('products', (newProducts) => {
         if (newProducts.length > 0 && this.tab === 'catalog' && this.catalogScrollPosition > 0 && !this._isRestoring) {
             this.$nextTick(() => {
